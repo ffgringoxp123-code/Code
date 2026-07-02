@@ -2206,7 +2206,6 @@ auto_spam_module:create_slider({
     end
 })
 
--- Versão reforçada do Avatar Changer (mantive o modelo do script e assinaturas)
 local __players = cloneref(game:GetService('Players'))
 local __localplayer = __players.LocalPlayer
 
