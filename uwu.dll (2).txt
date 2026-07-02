@@ -1736,7 +1736,7 @@ local hotkeyModule = rage:create_module({
     title = "AutoCurve Hotkey" .. (System.__properties.__is_mobile and "(Mobile)" or "(PC)"),
     description = "Press 1-6 to change curve",
     flag = "autocurve_hotkey",
-    section = "left",
+    section = "right",
     callback = function(state)
         getgenv().AutoCurveHotkeyEnabled = state
         
