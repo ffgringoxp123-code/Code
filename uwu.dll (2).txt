@@ -6,7 +6,7 @@ end
 
 _G.Sigma = true]]
 
-local Library = loadstring(game:HttpGet("https://pastefy.app/KjjTolwH/raw"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/SKR-Hub-t/Sakura-ui/refs/heads/main/Sakura.luau"))()
 
 local main = Library.new()
 
