@@ -5105,7 +5105,7 @@ hooks.oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
 end))
 
 local module = devJV:create_module({
-    title = "Walkable Semi-Immortal [BLATANT!]",
+    title = "Walkable Semi-Immortal [TEST]",
     description = "",
     flag = "Walkable_Semi_Immortal",
     section = "left",
@@ -5407,8 +5407,8 @@ main:load()
 local StarterGui = game:GetService('StarterGui')
 
 StarterGui:SetCore('SendNotification', {
-    Title = 'BETA',
-    Text = 'This Version is on BETA',
+    Title = 'SKR',
+    Text = 'Sakura Premium',
     Icon = 'rbxassetid://123456789',
     Duration = 10,
 })
