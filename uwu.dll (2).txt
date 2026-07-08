@@ -834,13 +834,11 @@ System.auto_spam = {}
 
 function System.auto_spam:get_entity_properties()
     System.player.get_closest()
-    
-    if not Closest_Entity then return false end
-    
+    if not Closest_Entity or not Closest_Entity.PrimaryPart then return false end
+    if not LocalPlayer.Character or not LocalPlayer.Character.PrimaryPart then return false end
     local entity_velocity = Closest_Entity.PrimaryPart.Velocity
     local entity_direction = (LocalPlayer.Character.PrimaryPart.Position - Closest_Entity.PrimaryPart.Position).Unit
     local entity_distance = (LocalPlayer.Character.PrimaryPart.Position - Closest_Entity.PrimaryPart.Position).Magnitude
-    
     return {
         Velocity = entity_velocity,
         Direction = entity_direction,
@@ -851,14 +849,19 @@ end
 function System.auto_spam:get_ball_properties()
     local ball = System.ball.get()
     if not ball then return false end
-    
-    local ball_velocity = Vector3.zero
+    if not LocalPlayer.Character or not LocalPlayer.Character.PrimaryPart then return false end
+    local ball_velocity = ball.AssemblyLinearVelocity or Vector3.new()
     local ball_origin = ball
-    
-    local ball_direction = (LocalPlayer.Character.PrimaryPart.Position - ball_origin.Position).Unit
-    local ball_distance = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Magnitude
-    local ball_dot = ball_direction:Dot(ball_velocity.Unit)
-    
+    local ball_direction_vector = LocalPlayer.Character.PrimaryPart.Position - ball_origin.Position
+    local ball_distance = ball_direction_vector.Magnitude
+    local ball_direction = Vector3.new()
+    local ball_dot = 0
+    if ball_distance > 0 then
+        ball_direction = ball_direction_vector.Unit
+        if ball_velocity.Magnitude > 0 then
+            ball_dot = ball_direction:Dot(ball_velocity.Unit)
+        end
+    end
     return {
         Velocity = ball_velocity,
         Direction = ball_direction,
@@ -868,98 +871,130 @@ function System.auto_spam:get_ball_properties()
 end
 
 function System.auto_spam.spam_service(self)
+    -- Adapted from zen.lua I5.Spam_Service (safe, no executor-only APIs)
     local ball = System.ball.get()
     local entity = System.player.get_closest()
-    
     if not ball or not entity or not entity.PrimaryPart then
         return false
     end
-    
-    local spam_accuracy = 0
-    
-    local velocity = ball.AssemblyLinearVelocity
-    local speed = velocity.Magnitude
-    
-    local direction = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Unit
-    local dot = direction:Dot(velocity.Unit)
-    
-    local target_position = entity.PrimaryPart.Position
-    local target_distance = LocalPlayer:DistanceFromCharacter(target_position)
-    
-    local maximum_spam_distance = self.Ping + math.min(speed / 6, 255)
-    
-    if self.Entity_Properties.Distance > maximum_spam_distance then
-        return spam_accuracy
+    if not LocalPlayer.Character or not LocalPlayer.Character.PrimaryPart then
+        return false
     end
-    
-    if self.Ball_Properties.Distance > maximum_spam_distance then
-        return spam_accuracy
+
+    -- default fallback
+    local D = 5
+
+    local velocity = ball.AssemblyLinearVelocity or Vector3.new()
+    local n = velocity.Magnitude
+    if n == 0 then
+        return D
     end
-    
-    if target_distance > maximum_spam_distance then
-        return spam_accuracy
+
+    local to_ball = (LocalPlayer.Character.PrimaryPart.Position - ball.Position)
+    if to_ball.Magnitude == 0 then
+        return D
     end
-    
-    local maximum_speed = 5 - math.min(speed / 5, 5)
-    local maximum_dot = math.clamp(dot, -1, 0) * maximum_speed
-    
-    spam_accuracy = maximum_spam_distance - maximum_dot
-    
-    return spam_accuracy
+
+    local r = to_ball.Unit
+    local t = 0
+    if n > 0 and velocity.Magnitude > 0 then
+        t = r:Dot(velocity.Unit)
+    end
+
+    local target_pos = entity.PrimaryPart.Position
+    local X = LocalPlayer:DistanceFromCharacter(target_pos)
+
+    local E = 1
+    local Fmove = Vector3.new()
+    local success, humanoid = pcall(function()
+        return LocalPlayer.Character and LocalPlayer.Character:FindFirstChildOfClass('Humanoid')
+    end)
+    if success and humanoid and humanoid.MoveDirection then
+        Fmove = humanoid.MoveDirection
+    end
+
+    local N = (target_pos - LocalPlayer.Character.PrimaryPart.Position)
+    if N.Magnitude > 0 then N = N.Unit else N = Vector3.new() end
+    local lmove = Vector3.new()
+    if entity then
+        local ehum = entity:FindFirstChildOfClass('Humanoid')
+        if ehum and ehum.MoveDirection then lmove = ehum.MoveDirection end
+    end
+
+    -- close contact heuristic (local state preserved in globals similar to zen.lua)
+    _G.Last_Close_Contact = _G.Last_Close_Contact or 0
+    _G.In_Close_Contact = _G.In_Close_Contact or false
+    local now = tick()
+    if X <= 3 then
+        _G.In_Close_Contact = true
+    end
+    if _G.In_Close_Contact and X > 3.3 then
+        _G.In_Close_Contact = false
+        _G.Last_Close_Contact = now
+    end
+    local u = (not _G.In_Close_Contact) and (now - (_G.Last_Close_Contact or 0) >= 1.5)
+    if u and (Fmove.Magnitude > 0.2 and Fmove:Dot(N) < -0.4) then
+        E = 10
+    end
+    if u and (lmove.Magnitude > 0.2 and lmove:Dot(-N) < -0.4) then
+        E = 10
+    end
+
+    -- Ping/ball-speed based base threshold
+    local B = (self.Ping or 50) * 0.7 + math.min(n / (E * 1.2), 80)
+
+    -- if entity/ball/target farther than base threshold return default
+    if (self.Entity_Properties and self.Entity_Properties.Distance or math.huge) > B then
+        return D
+    end
+    if (self.Ball_Properties and self.Ball_Properties.Distance or math.huge) > B then
+        return D
+    end
+    if X > B then
+        return D
+    end
+
+    local U = math.clamp(-t, 0, 1)
+    local q = math.clamp(U * (n / 40), 0, 4)
+    D = B - q
+    return D
 end
 
 function System.auto_spam.start()
     if System.__properties.__connections.__auto_spam then
         System.__properties.__connections.__auto_spam:Disconnect()
     end
-    
     System.__properties.__auto_spam_enabled = true
     System.__properties.__connections.__auto_spam = RunService.PreSimulation:Connect(function()
         local ball = System.ball.get()
-        
         if not ball then return end
-        
-        if System.__properties.__slashesoffury_active then return end
-        
         local zoomies = ball:FindFirstChild('zoomies')
         if not zoomies then return end
-        
         System.player.get_closest()
-        
         local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
         local ping_threshold = math.clamp(ping / 10, 1, 16)
-        
         local ball_target = ball:GetAttribute('target')
-        
         local ball_properties = System.auto_spam:get_ball_properties()
         local entity_properties = System.auto_spam:get_entity_properties()
-        
         if not ball_properties or not entity_properties then return end
-        
         local spam_accuracy = System.auto_spam.spam_service({
             Ball_Properties = ball_properties,
             Entity_Properties = entity_properties,
             Ping = ping_threshold
         })
-        
         local target_position = Closest_Entity.PrimaryPart.Position
         local target_distance = LocalPlayer:DistanceFromCharacter(target_position)
-        
+        if zoomies.VectorVelocity.Magnitude == 0 then return end
         local direction = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Unit
         local ball_direction = zoomies.VectorVelocity.Unit
-        
         local dot = direction:Dot(ball_direction)
         local distance = LocalPlayer:DistanceFromCharacter(ball.Position)
-        
         if not ball_target then return end
         if target_distance > spam_accuracy or distance > spam_accuracy then return end
-        
         local pulsed = LocalPlayer.Character:GetAttribute('Pulsed')
         if pulsed then return end
-        
         if ball_target == LocalPlayer.Name and target_distance > 30 and distance > 30 then return end
-        
-                    if distance <= spam_accuracy and System.__properties.__parries > System.__properties.__spam_threshold then
+        if distance <= spam_accuracy and System.__properties.__parries > System.__properties.__spam_threshold then
             if getgenv().AutoSpamMode == "Keypress" then
                 if PF then PF() end
             else
@@ -979,7 +1014,6 @@ function System.auto_spam.stop()
         System.__properties.__connections.__auto_spam = nil
     end
 end
-
 
 System.autoparry = {}
 
