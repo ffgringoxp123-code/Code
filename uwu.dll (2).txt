@@ -2146,29 +2146,23 @@ manual_spam_module:create_slider({
 })
 
 local auto_spam_module = set:create_module({
-    title = 'Auto Spam',
-    flag = 'Auto_Spam_Parry',
-    description = 'Automatically spam parries ball',
-    section = 'right',
-    callback = function(value)
-        System.__properties.__auto_spam_enabled = value
-        if value then
-            System.auto_spam.start()
-            if getgenv().AutoSpamNotify then
-                Library.SendNotification({
-                    title = "Auto Spam",
-                    text = "ON",
-                    duration = 2
-                })
-            end
-        else
-            System.auto_spam.stop()
-            if getgenv().AutoSpamNotify then
-                Library.SendNotification({
-                    title = "Auto Spam",
-                    text = "OFF",
-                    duration = 2
-                })
+        title = "Auto Spam",
+    description = "Automatically spam parries ball",
+    flag = "AutoSpamModule",
+    section = "right",
+    callback = function(state)
+        if System and System.auto_spam then
+            System.__properties.__auto_spam_enabled = state
+            if state then
+                if System.auto_spam and System.auto_spam.start then pcall(System.auto_spam.start) end
+                if getgenv().AutoSpamNotify then
+                    Library.SendNotification({ title = "Auto Spam", text = "ON", duration = 2 })
+                end
+            else
+                if System.auto_spam and System.auto_spam.stop then pcall(System.auto_spam.stop) end
+                if getgenv().AutoSpamNotify then
+                    Library.SendNotification({ title = "Auto Spam", text = "OFF", duration = 2 })
+                end
             end
         end
     end
@@ -2176,24 +2170,20 @@ local auto_spam_module = set:create_module({
 
 auto_spam_module:create_checkbox({
     title = "Notify",
-    flag = "Auto_Spam_Notify",
+    flag = "AutoSpamNotify",
     callback = function(value)
         getgenv().AutoSpamNotify = value
     end
 })
-
 auto_spam_module:create_dropdown({
     title = "Mode",
-    flag = "autospam_mode",
+    flag = "AutoSpamMode",
     options = {"Remote", "Keypress"},
-    default = "Remote",
-    multi_dropdown = false,
-    maximum_options = 2,
-    callback = function(value)
-        getgenv().AutoSpamMode = value
+    maximum_options = 10,
+    callback = function(Value)
+        getgenv().AutoSpamMode = Value
     end
 })
-
 auto_spam_module:create_checkbox({
     title = "Animation Fix",
     flag = "AutoSpamAnimationFix",
@@ -2201,16 +2191,26 @@ auto_spam_module:create_checkbox({
         getgenv().AutoSpamAnimationFix = value
     end
 })
-
 auto_spam_module:create_slider({
     title = "Parry Threshold",
-    flag = "Parry_Threshold",
-    maximum_value = 5,
-    minimum_value = 1,
+    flag = "ParryThreshold",
+    maximum_value = 10,
+    minimum_value = 0,
     value = 2.5,
-    round_number = false,
+    round_number = true,
     callback = function(value)
-        System.__properties.__spam_threshold = value
+        if System then System.__properties.__spam_threshold = value end
+    end
+})
+auto_spam_module:create_slider({
+    title = "Distance Multiplier",
+    flag = "DistanceMultiplier",
+    maximum_value = 3.0,
+    minimum_value = 0.3,
+    value = 0.3,
+    round_number = true,
+    callback = function(value)
+        if System then System.__properties.__auto_spam_distance_multiplier = value end
     end
 })
 
