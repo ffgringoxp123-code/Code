@@ -5455,3 +5455,5 @@ if balls then
 end
 
 main:load()
+
+local StarterGui = game:GetService('StarterGui')
