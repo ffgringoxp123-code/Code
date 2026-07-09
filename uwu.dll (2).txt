@@ -2184,35 +2184,74 @@ manual_spam_module:create_slider({
 })
 
 local auto_spam_module = set:create_module({
- Title = "Auto Spam",
-    Description = "Automatically spam parries ball",
-    flag = "AutoSpamModule",
-    Section = "right",
-    Callback = function(state)
+ title = 'Auto Spam',
+    flag = 'Auto_Spam_Parry',
+    description = 'Automatically spam parries ball',
+    section = 'right',
+    callback = function(value)
         System.__properties.__auto_spam_enabled = value
-        getgenv(value).animationfix = value
-        System.animation.play_grab_parry(value)
         if value then
             System.auto_spam.start()
             if getgenv().AutoSpamNotify then
-                Window:Notify({
-                    Title = "Auto Spam",
-                    Desc = "ON",
-                    Time = 2
+                Library.SendNotification({
+                    title = "Auto Spam",
+                    text = "ON",
+                    duration = 2
                 })
             end
         else
             System.auto_spam.stop()
             if getgenv().AutoSpamNotify then
-                Window:Notify({
-                    Title = "Auto Spam",
-                    Desc = "OFF",
-                    Time = 2
+                Library.SendNotification({
+                    title = "Auto Spam",
+                    text = "OFF",
+                    duration = 2
                 })
             end
         end
     end
 })
+
+auto_spam_module:create_checkbox({
+    title = "Notify",
+    flag = "Auto_Spam_Notify",
+    callback = function(value)
+        getgenv().AutoSpamNotify = value
+    end
+})
+
+auto_spam_module:create_dropdown({
+    title = "Mode",
+    flag = "autospam_mode",
+    options = {"Remote", "Keypress"},
+    default = "Remote",
+    multi_dropdown = false,
+    maximum_options = 2,
+    callback = function(value)
+        getgenv().AutoSpamMode = value
+    end
+})
+
+auto_spam_module:create_checkbox({
+    title = "Animation Fix",
+    flag = "AutoSpamAnimationFix",
+    callback = function(value)
+        getgenv().AutoSpamAnimationFix = value
+    end
+})
+
+auto_spam_module:create_slider({
+    title = "Parry Threshold",
+    flag = "Parry_Threshold",
+    maximum_value = 5,
+    minimum_value = 1,
+    value = 2.5,
+    round_number = false,
+    callback = function(value)
+        System.__properties.__spam_threshold = value
+    end
+})
+
 
 local function create_animation(object, info, value)
     local animation = game:GetService('TweenService'):Create(object, info, value)
