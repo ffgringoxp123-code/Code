@@ -2266,7 +2266,6 @@ auto_spam_module:create_slider({
     end
 })
 
-
 local function create_animation(object, info, value)
     local animation = game:GetService('TweenService'):Create(object, info, value)
     animation:Play()
