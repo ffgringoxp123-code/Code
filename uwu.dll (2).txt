@@ -6,7 +6,7 @@ end
 
 _G.Sigma = true]]
 
-local Library = loadstring(game:HttpGet("https://pastefy.app/KjjTolwH/raw"))()
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/ffgringoxp123-code/Code/refs/heads/main/Sakura.luau"))()
 
 local main = Library.new()
 
@@ -60,7 +60,7 @@ local System = {
         __connections = {},
         __reverted_remotes = {},
         __spam_accumulator = 0,
-        __spam_rate = 350,
+        __spam_rate = 280,
         __infinity_active = false,
         __deathslash_active = false,
         __timehole_active = false,
