@@ -5157,17 +5157,17 @@ hooks.oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
 end))
 
 local module = devJV:create_module({
-    title = "Walkable Semi-Immortal [TEST]",
+    title = "Semi-Immortal [TEST]",
     description = "",
-    flag = "Walkable_Semi_Immortal",
+    flag = "Semi_Immortal",
     section = "left",
-    callback = WalkableSemiImmortal.toggle
+    callback = SemiImmortal.toggle
 })
 
 module:create_checkbox({
     title = "Notify",
-    flag = "WalkableSemi_Imortal_Notify",
-    callback = WalkableSemiImmortal.setNotify
+    flag = "Semi_Imortal_Notify",
+    callback = SemiImmortal.setNotify
 })
 
 module:create_slider({
@@ -5177,17 +5177,17 @@ module:create_slider({
     minimum_value = 0,
     value = 25,
     round_number = true,
-    callback = WalkableSemiImmortal.setRadius
+    callback = SemiImmortal.setRadius
 })
 
 module:create_slider({
     title = 'Immortal Height',
-    flag = 'Walkable_Immortal_Radius',
+    flag = 'Immortal_Radius',
     maximum_value = 60,
     minimum_value = 0,
     value = 30,
     round_number = true,
-    callback = WalkableSemiImmortal.setHeight
+    callback = SemiImmortal.setHeight
 })
 
 --[[local Invisibilidade = {}
@@ -5455,12 +5455,3 @@ if balls then
 end
 
 main:load()
-
-local StarterGui = game:GetService('StarterGui')
-
-StarterGui:SetCore('SendNotification', {
-    Title = 'SKR',
-    Text = 'Sakura Premium',
-    Icon = 'rbxassetid://123456789',
-    Duration = 10,
-})
