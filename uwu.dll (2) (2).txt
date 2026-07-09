@@ -832,19 +832,56 @@ end
 
 System.auto_spam = {}
 
+local autoSpamThread = nil
+
+function System.auto_spam.start()
+    System.auto_spam.stop()
+
+    System.__properties.__auto_spam_enabled = true
+
+    autoSpamThread = coroutine.create(function()
+        while System.__properties.__auto_spam_enabled do
+            if System.__properties.__spam_target then
+                System.parry.execute()
+            end
+
+            coroutine.yield()
+        end
+    end)
+
+    task.spawn(function()
+        while System.__properties.__auto_spam_enabled
+            and autoSpamThread
+            and coroutine.status(autoSpamThread) ~= "dead" do
+
+            coroutine.resume(autoSpamThread)
+            task.wait()
+        end
+    end)
+end
+
+function System.auto_spam.stop()
+    System.__properties.__auto_spam_enabled = false
+    System.__properties.__spam_target = nil
+    System.__properties.__spam_target_time = 0
+    autoSpamThread = nil
+end
+
 function System.auto_spam:get_entity_properties()
-    System.player.get_closest()
+    local entity = Closest_Entity
+    if not entity or not entity.PrimaryPart then return false end
     
-    if not Closest_Entity then return false end
+    local char = LocalPlayer.Character
+    if not char or not char.PrimaryPart then return false end
     
-    local entity_velocity = Closest_Entity.PrimaryPart.Velocity
-    local entity_direction = (LocalPlayer.Character.PrimaryPart.Position - Closest_Entity.PrimaryPart.Position).Unit
-    local entity_distance = (LocalPlayer.Character.PrimaryPart.Position - Closest_Entity.PrimaryPart.Position).Magnitude
+    local root_pos = char.PrimaryPart.Position
+    local entity_pos = entity.PrimaryPart.Position
+    local diff = root_pos - entity_pos
     
     return {
-        Velocity = entity_velocity,
-        Direction = entity_direction,
-        Distance = entity_distance
+        Velocity = entity.PrimaryPart.Velocity,
+        Direction = diff.Unit,
+        Distance = diff.Magnitude
     }
 end
 
@@ -852,18 +889,20 @@ function System.auto_spam:get_ball_properties()
     local ball = System.ball.get()
     if not ball then return false end
     
-    local ball_velocity = Vector3.zero
-    local ball_origin = ball
+    local char = LocalPlayer.Character
+    if not char or not char.PrimaryPart then return false end
     
-    local ball_direction = (LocalPlayer.Character.PrimaryPart.Position - ball_origin.Position).Unit
-    local ball_distance = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Magnitude
-    local ball_dot = ball_direction:Dot(ball_velocity.Unit)
+    local ball_pos = ball.Position
+    local root_pos = char.PrimaryPart.Position
+    local diff = root_pos - ball_pos
+    
+    local ball_velocity = ball.AssemblyLinearVelocity or Vector3.zero
     
     return {
         Velocity = ball_velocity,
-        Direction = ball_direction,
-        Distance = ball_distance,
-        Dot = ball_dot
+        Direction = diff.Unit,
+        Distance = diff.Magnitude,
+        Dot = diff.Unit:Dot(ball_velocity.Unit)
     }
 end
 
@@ -877,7 +916,7 @@ function System.auto_spam.spam_service(self)
     
     local spam_accuracy = 0
     
-    local velocity = ball.AssemblyLinearVelocity
+    local velocity = ball.AssemblyLinearVelocity or Vector3.zero
     local speed = velocity.Magnitude
     
     local direction = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Unit
@@ -886,22 +925,24 @@ function System.auto_spam.spam_service(self)
     local target_position = entity.PrimaryPart.Position
     local target_distance = LocalPlayer:DistanceFromCharacter(target_position)
     
-    local maximum_spam_distance = self.Ping + math.min(speed / 6, 255)
+    local multiplier = System.__properties.__auto_spam_distance_multiplier or 1.0
+    local base_distance = 30 * multiplier
+    local maximum_spam_distance = (self.Ping + math.min(speed / 4, 60)) * multiplier
     
-    if self.Entity_Properties.Distance > maximum_spam_distance then
-        return spam_accuracy
+    if self.Entity_Properties.Distance > maximum_spam_distance and self.Entity_Properties.Distance > base_distance then
+        return 0
     end
     
-    if self.Ball_Properties.Distance > maximum_spam_distance then
-        return spam_accuracy
+    if self.Ball_Properties.Distance > maximum_spam_distance and self.Ball_Properties.Distance > base_distance then
+        return 0
     end
     
-    if target_distance > maximum_spam_distance then
-        return spam_accuracy
+    if target_distance > maximum_spam_distance and target_distance > base_distance then
+        return 0
     end
     
-    local maximum_speed = 5 - math.min(speed / 5, 5)
-    local maximum_dot = math.clamp(dot, -1, 0) * maximum_speed
+    local maximum_speed =  7 - math.min(speed / 5, 5)
+    local maximum_dot = math.clamp(dot, -1, 1) * maximum_speed
     
     spam_accuracy = maximum_spam_distance - maximum_dot
     
@@ -909,75 +950,121 @@ function System.auto_spam.spam_service(self)
 end
 
 function System.auto_spam.start()
-    if System.__properties.__connections.__auto_spam then
-        System.__properties.__connections.__auto_spam:Disconnect()
+    if System.__properties.__connections.__auto_spam_connection then
+        System.__properties.__connections.__auto_spam_connection:Disconnect()
     end
     
     System.__properties.__auto_spam_enabled = true
-    System.__properties.__connections.__auto_spam = RunService.PreSimulation:Connect(function()
-        local ball = System.ball.get()
+    
+    local last_auto_spam = 0
+    local last_target_check = 0
+    local event = RunService.Heartbeat
+    
+    -- Cache de funções e serviços para performance
+    local get_ball = System.ball.get
+    local get_closest = System.player.get_closest
+    local parry_keypress = System.parry.keypress
+    local parry_execute = System.parry.execute
+    local play_animation = System.animation.play_grab_parry
+    
+    System.__properties.__connections.__auto_spam_connection = event:Connect(function()
+        local char = LocalPlayer.Character
+        if not System.__properties.__auto_spam_enabled or not char or char.Parent ~= Alive then
+            return
+        end
         
+        local now = tick()
+        local threshold = 0.015
+        if now - last_auto_spam < threshold then return end
+        last_auto_spam = now
+            
+        local ball = get_ball()
         if not ball then return end
-        
-        if System.__properties.__slashesoffury_active then return end
         
         local zoomies = ball:FindFirstChild('zoomies')
         if not zoomies then return end
         
-        System.player.get_closest()
-        
-        local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
-        local ping_threshold = math.clamp(ping / 10, 1, 16)
+        -- Otimização: Não busca o player mais próximo a cada frame, apenas a cada 0.1s
+        if now - last_target_check > 0.1 then
+            get_closest()
+            last_target_check = now
+            
+            if System.__properties.__spam_target then
+                local target = System.__properties.__spam_target
+                if not target.Parent or not target:FindFirstChild("Humanoid") or target.Humanoid.Health <= 0 then
+                    System.__properties.__spam_target = nil
+                    System.__properties.__spam_target_time = 0
+                end
+            end
+            
+            if not System.__properties.__spam_target or (now - System.__properties.__spam_target_time > 1) then
+                System.__properties.__spam_target = Closest_Entity
+                System.__properties.__spam_target_time = now
+            end
+        end
         
         local ball_target = ball:GetAttribute('target')
+        if not ball_target then return end
         
         local ball_properties = System.auto_spam:get_ball_properties()
         local entity_properties = System.auto_spam:get_entity_properties()
         
-        if not ball_properties or not entity_properties then return end
-        
-        local spam_accuracy = System.auto_spam.spam_service({
-            Ball_Properties = ball_properties,
-            Entity_Properties = entity_properties,
-            Ping = ping_threshold
-        })
-        
-        local target_position = Closest_Entity.PrimaryPart.Position
-        local target_distance = LocalPlayer:DistanceFromCharacter(target_position)
-        
-        local direction = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Unit
-        local ball_direction = zoomies.VectorVelocity.Unit
-        
-        local dot = direction:Dot(ball_direction)
-        local distance = LocalPlayer:DistanceFromCharacter(ball.Position)
-        
-        if not ball_target then return end
-        if target_distance > spam_accuracy or distance > spam_accuracy then return end
-        
-        local pulsed = LocalPlayer.Character:GetAttribute('Pulsed')
-        if pulsed then return end
-        
-        if ball_target == LocalPlayer.Name and target_distance > 30 and distance > 30 then return end
-        
-                    if distance <= spam_accuracy and System.__properties.__parries > System.__properties.__spam_threshold then
-            if getgenv().AutoSpamMode == "Keypress" then
-                if PF then PF() end
-            else
-                System.parry.execute()
-                if getgenv().AutoSpamAnimationFix and PF then
-                    PF()
+        if ball_properties and entity_properties then
+            local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
+            local ping_threshold = math.clamp(ping / 5, 1, 16)
+            
+            local spam_accuracy = System.auto_spam.spam_service({
+                Ball_Properties = ball_properties,
+                Entity_Properties = entity_properties,
+                Ping = ping_threshold
+            })
+            
+            if spam_accuracy > 0 then
+                local root = char.PrimaryPart
+                if not root then return end
+                
+                local target_entity = Closest_Entity
+                if not target_entity or not target_entity.PrimaryPart then return end
+                
+                local target_pos = target_entity.PrimaryPart.Position
+                local target_dist = (root.Position - target_pos).Magnitude
+                
+                local ball_pos = ball.Position
+                local dist_to_ball = (root.Position - ball_pos).Magnitude
+                
+                local shouldSpam = false
+                local spam_target = System.__properties.__spam_target
+                if spam_target then
+                    if ball_target == spam_target.Name or ball_target == LocalPlayer.Name then
+                        shouldSpam = true
+                    end
+                end
+                
+                if shouldSpam and not char:GetAttribute('Pulsed') then
+                    if target_dist <= spam_accuracy and dist_to_ball <= spam_accuracy then
+                        local multiplier = System.__properties.__auto_spam_distance_multiplier or 1.0
+                        local max_allowed_dist = 35 * multiplier
+                        
+                        local is_target = (ball_target == LocalPlayer.Name)
+                        local final_max_dist = is_target and max_allowed_dist or (max_allowed_dist * 0.8)
+                        
+                        if target_dist <= final_max_dist and dist_to_ball <= final_max_dist then
+                            if System.__properties.__parries > System.__properties.__spam_threshold then
+                                if getgenv().AutoSpamMode == "Keypress" then
+                                    parry_keypress()
+                                else
+                                    parry_execute()
+                                    if getgenv().AutoSpamAnimationFix then
+                                        play_animation()
+                                    end
+                                end
+                            end
+                        end
+                    end
                 end
             end
         end
     end)
-end
-
-function System.auto_spam.stop()
-    System.__properties.__auto_spam_enabled = false
-    if System.__properties.__connections.__auto_spam then
-        System.__properties.__connections.__auto_spam:Disconnect()
-        System.__properties.__connections.__auto_spam = nil
-    end
 end
 
 System.autoparry = {}
@@ -1736,7 +1823,7 @@ local hotkeyModule = rage:create_module({
     title = "AutoCurve Hotkey" .. (System.__properties.__is_mobile and "(Mobile)" or "(PC)"),
     description = "Press 1-6 to change curve",
     flag = "autocurve_hotkey",
-    section = "left",
+    section = "right",
     callback = function(state)
         getgenv().AutoCurveHotkeyEnabled = state
         
@@ -2203,306 +2290,6 @@ auto_spam_module:create_slider({
     round_number = false,
     callback = function(value)
         System.__properties.__spam_threshold = value
-    end
-})
-
-local __players = cloneref(game:GetService('Players'))
-local __localplayer = __players.LocalPlayer
-
-local __flags = {}
-local __currentDesc = nil
-local __targetUserId = nil
-local __persistent_tasks = {} -- index por Character para coroutines/threads de reaplicação
-
--- Função utilitária para comparar se a descrição aplicada parece OK
--- Não existe comparação perfeita, mas checamos algumas propriedades chave (Shirt/Pants/Graphic)
-local function __descriptions_match(a, b)
-    if not a or not b then return false end
-    -- Compara algumas propriedades comumente usadas
-    local keys = {"Shirt", "Pants", "ShirtGraphic", "Head", "Face", "BodyTypeScale", "HeightScale", "WidthScale", "DepthScale", "ProportionScale"}
-    for _,k in ipairs(keys) do
-        local av = a[k]
-        local bv = b[k]
-        if (av ~= nil and bv ~= nil) and tostring(av) ~= tostring(bv) then
-            return false
-        end
-    end
-    return true
-end
-
--- APLICAÇÃO EXTREMAMENTE FORÇADA – várias estratégias
-local function __force_apply_brutal(hum, desc)
-    if not hum or not desc then return false end
-
-    -- 0) Tenta aplicar diretamente algumas vezes rápidas
-    for _ = 1, 20 do
-        pcall(function()
-            hum:ApplyDescriptionClientServer(desc)
-        end)
-        task.wait(0.05)
-        local applied = nil
-        pcall(function() applied = hum:GetAppliedDescription() end)
-        if applied and __descriptions_match(applied, desc) then
-            return true
-        end
-    end
-
-    -- 1) Reset suave e tentar de novo
-    pcall(function()
-        hum.Description = Instance.new("HumanoidDescription")
-    end)
-    task.wait(0.1)
-
-    for _ = 1, 20 do
-        pcall(function()
-            hum:ApplyDescriptionClientServer(desc)
-        end)
-        task.wait(0.05)
-        local applied = nil
-        pcall(function() applied = hum:GetAppliedDescription() end)
-        if applied and __descriptions_match(applied, desc) then
-            return true
-        end
-    end
-
-    -- 2) Tenta recriar humanoid se houver HumanoidRootPart (substituição forçada)
-    local parent = hum.Parent
-    local root = parent and parent:FindFirstChild("HumanoidRootPart")
-    if root and parent then
-        local old = hum
-        local success, newHum = pcall(function()
-            local nh = Instance.new("Humanoid")
-            nh.Name = "Humanoid"
-            nh.Parent = parent
-            return nh
-        end)
-        task.wait(0.05)
-        if success and newHum then
-            -- Destrói o antigo para forçar atualização de character
-            pcall(function() old:Destroy() end)
-            hum = newHum
-            task.wait(0.05)
-        end
-    end
-
-    -- 3) Última onda de tentativas estendidas
-    for _ = 1, 80 do
-        pcall(function()
-            hum:ApplyDescriptionClientServer(desc)
-        end)
-        task.wait(0.05)
-        local applied = nil
-        pcall(function() applied = hum:GetAppliedDescription() end)
-        if applied and __descriptions_match(applied, desc) then
-            return true
-        end
-    end
-
-    return false
-end
-
-local function __apparence(__name)
-    local s, e = pcall(function()
-        local __id = __players:GetUserIdFromNameAsync(__name)
-        return __players:GetHumanoidDescriptionFromUserId(__id), __id
-    end)
-
-    if not s then
-        return nil, nil
-    end
-
-    return e -- e is actually two return values if successful
-end
-
--- Inicia um loop persistente que reaplica a descrição enquanto o flag estiver ativo
-local function __start_persistent_reapply(character, desc)
-    if not character or not desc then return end
-    local charKey = character
-    -- Se já existe tarefa persistente para esse char, não crie outra
-    if __persistent_tasks[charKey] then return end
-
-    local stop = false
-    __persistent_tasks[charKey] = {
-        stop = function() stop = true end
-    }
-
-    spawn(function()
-        -- procura humanoid (pode demorar)
-        local hum = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
-        if not hum then
-            __persistent_tasks[charKey] = nil
-            return
-        end
-
-        -- Se o humanoid for substituído, reativa a tentativa (escuta Humanoid.AncestryChanged/Humanoid.Changed)
-        local conn
-        conn = hum:GetPropertyChangedSignal("Parent"):Connect(function()
-            if not hum.Parent then
-                -- humanoid removido, finaliza e espera novo humanoid
-                if conn then conn:Disconnect() end
-            end
-        end)
-
-        -- Loop principal: tenta forçar, depois reaplica periodicamente
-        while not stop and character.Parent do
-            -- aplica brutalmente uma vez
-            pcall(function()
-                __force_apply_brutal(hum, desc)
-            end)
-
-            -- checa se aplicado corretamente
-            local applied = nil
-            pcall(function() applied = hum:GetAppliedDescription() end)
-            if applied and __descriptions_match(applied, desc) then
-                -- boa aplicação; aguarda mais tempo antes de verificar novamente
-                for i = 1, 40 do
-                    if stop or not character.Parent then break end
-                    task.wait(0.25)
-                end
-            else
-                -- não aplicou corretamente -> aumentar frequência de tentativas
-                for i = 1, 20 do
-                    if stop or not character.Parent then break end
-                    pcall(function()
-                        hum:ApplyDescriptionClientServer(desc)
-                    end)
-                    task.wait(0.1)
-                    pcall(function() applied = hum:GetAppliedDescription() end)
-                    if applied and __descriptions_match(applied, desc) then break end
-                end
-            end
-
-            -- Se humanoid foi destruído e substituído, atualiza referência
-            if not hum.Parent or not hum.Parent:IsDescendantOf(game) then
-                hum = character:FindFirstChildOfClass("Humanoid") or character:WaitForChild("Humanoid", 5)
-            end
-        end
-
-        -- cleanup
-        if conn then pcall(function() conn:Disconnect() end) end
-        __persistent_tasks[charKey] = nil
-    end)
-end
-
-local function __stop_all_persistent()
-    for k,v in pairs(__persistent_tasks) do
-        if v and type(v.stop) == "function" then
-            pcall(v.stop)
-        end
-        __persistent_tasks[k] = nil
-    end
-end
-
-local function __set(__name, __char)
-    if not __name or __name == '' then
-        return
-    end
-
-    local __hum = __char and __char:WaitForChild('Humanoid', 5)
-
-    if not __hum then
-        return
-    end
-
-    local success, __desc, __id = pcall(function()
-        local id = __players:GetUserIdFromNameAsync(__name)
-        local desc = __players:GetHumanoidDescriptionFromUserId(id)
-        return desc, id
-    end)
-
-    if not success or not __desc then
-        warn("Failed to get appearance for: " .. tostring(__name))
-        return
-    end
-
-    -- Guarda alvo atual
-    __currentDesc = __desc
-    __targetUserId = __id
-
-    -- LIMPA TUDO localmente (mantendo seu comportamento)
-    pcall(function()
-        __localplayer:ClearCharacterAppearance()
-        __hum.Description = Instance.new("HumanoidDescription")
-    end)
-
-    task.wait(0.05)
-
-    -- APLICAÇÃO IMPOSSÍVEL DE FALHAR (tentativa imediata e depois persistente)
-    pcall(function()
-        __force_apply_brutal(__hum, __desc)
-    end)
-
-    -- Inicia reaplicação persistente para cobrir respawn/humanoid reset/substituição
-    __start_persistent_reapply(__char, __desc)
-end
-
-local module = pl:create_module({
-    title = 'Avatar Changer',
-    flag = 'AvatarChanger',
-    description = 'Change your avatar to another player',
-    section = 'left',
-    callback = function(val)
-        __flags['Skin Changer'] = val
-
-        if val then
-            local __char = __localplayer.Character
-
-            if __char and __flags['name'] then
-                __set(__flags['name'], __char)
-            end
-
-            -- Conectar CharacterAdded para reaplicar sempre no spawn/respawn
-            __flags['loop'] = __localplayer.CharacterAdded:Connect(function(char)
-                task.wait(0.05)
-                if __flags['name'] then
-                    __set(__flags['name'], char)
-                end
-            end)
-        else
-            -- Desligando: desconectar e tentar restaurar skin local
-            if __flags['loop'] then
-                __flags['loop']:Disconnect()
-                __flags['loop'] = nil
-
-                -- Para tarefas persistentes
-                __stop_all_persistent()
-
-                local __char = __localplayer.Character
-
-                if __char then
-                    -- Restaura a aparência original do próprio jogador
-                    pcall(function()
-                        __localplayer:ClearCharacterAppearance()
-                        -- tenta reaplicar descrição padrão do usuário
-                        local ok, desc = pcall(function()
-                            return __players:GetHumanoidDescriptionFromUserId(__localplayer.UserId)
-                        end)
-                        if ok and desc then
-                            local hum = __char:FindFirstChildOfClass("Humanoid") or __char:WaitForChild("Humanoid", 3)
-                            if hum then
-                                hum:ApplyDescriptionClientServer(desc)
-                            end
-                        end
-                    end)
-                end
-            end
-        end
-    end
-})
-
-module:create_textbox({
-    title = "Target Username",
-    placeholder = "Enter Username...",
-    flag = "AvatarChangerTextbox",
-    callback = function(val: string)
-        __flags['name'] = val
-
-        if __flags['Skin Changer'] and val ~= '' then
-            local __char = __localplayer.Character
-            if __char then
-                __set(val, __char)
-            end
-        end
     end
 })
 
@@ -5397,17 +5184,17 @@ hooks.oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
 end))
 
 local module = devJV:create_module({
-    title = "Walkable Semi-Immortal [BLATANT!]",
+    title = "Semi-Immortal [BETA]",
     description = "",
-    flag = "Walkable_Semi_Immortal",
+    flag = "Semi_Immortal",
     section = "left",
-    callback = WalkableSemiImmortal.toggle
+    callback = SemiImmortal.toggle
 })
 
 module:create_checkbox({
     title = "Notify",
-    flag = "WalkableSemi_Imortal_Notify",
-    callback = WalkableSemiImmortal.setNotify
+    flag = "Semi_Imortal_Notify",
+    callback = SemiImmortal.setNotify
 })
 
 module:create_slider({
@@ -5417,17 +5204,17 @@ module:create_slider({
     minimum_value = 0,
     value = 25,
     round_number = true,
-    callback = WalkableSemiImmortal.setRadius
+    callback = SemiImmortal.setRadius
 })
 
 module:create_slider({
     title = 'Immortal Height',
-    flag = 'Walkable_Immortal_Radius',
+    flag = 'Immortal_Radius',
     maximum_value = 60,
     minimum_value = 0,
     value = 30,
     round_number = true,
-    callback = WalkableSemiImmortal.setHeight
+    callback = SemiImmortal.setHeight
 })
 
 --[[local Invisibilidade = {}
@@ -5637,7 +5424,7 @@ hooks.oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
 end))
 
 local module = devuwu:create_module({
-    title = "Dupe Ball[BLATANT!]",
+    title = "Dupe Ball",
     description = "",
     flag = "IDK_Toggle",
     section = "right",
@@ -5699,8 +5486,8 @@ main:load()
 local StarterGui = game:GetService('StarterGui')
 
 StarterGui:SetCore('SendNotification', {
-    Title = 'BETA',
-    Text = 'This Version is on BETA',
-    Icon = 'rbxassetid://123456789',
+    Title = 'SKR',
+    Text = 'This is an older, revised version',
+    Icon = 'rbxassetid://138471605807717',
     Duration = 10,
 })
