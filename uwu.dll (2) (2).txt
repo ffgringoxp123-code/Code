@@ -5488,6 +5488,6 @@ local StarterGui = game:GetService('StarterGui')
 StarterGui:SetCore('SendNotification', {
     Title = 'SKR',
     Text = 'This is an older, revised version',
-    Icon = 'rbxassetid://138471605807717',
+    Icon = 'rbxassetid://123456789',
     Duration = 10,
 })
