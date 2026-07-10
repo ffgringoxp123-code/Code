@@ -1,0 +1,722 @@
+   ██╗  ██╗██╗████████╗████████╗██╗   ██╗██╗      ██████╗ ██╗     
+   ██║ ██╔╝██║╚══██╔══╝╚══██╔══╝╚██╗ ██╔╝██║     ██╔═══██╗██║     
+   █████╔╝ ██║   ██║      ██║    ╚████╔╝ ██║     ██║   ██║██║     
+   ██╔═██╗ ██║   ██║      ██║     ╚██╔╝  ██║     ██║   ██║██║     
+   ██║  ██╗██║   ██║      ██║      ██║   ███████╗╚██████╔╝███████╗
+   ╚═╝  ╚═╝╚═╝   ╚═╝      ╚═╝      ╚═╝   ╚══════╝ ╚═════╝ ╚══════
+K I T T Y L O L
+local UI = loadstring(game:HttpGet("https://raw.githubusercontent.com/dyxreign/Luanny-UI/refs/heads/main/src/Luanny.lua"))()
+
+local Window = UI:CreateWindow({
+    Title = "Kittylol Hub",
+    Author = "by kittylol",
+    Transparent = false,
+    Theme = "Dark",
+    ShowWindow = true
+})
+
+local Antilag = {}
+local antilagEnabled = false
+local antilagMaterials = {}
+local antilagDecalsTextures = {}
+local antilagParticles = {}
+local antilagConnection = nil
+
+function Antilag:SaveAndApply()
+    antilagMaterials = {}; antilagDecalsTextures = {}; antilagParticles = {}
+    for _, O in ipairs(workspace:GetDescendants()) do
+        pcall(function()
+            if O:IsA("BasePart") and not (O:FindFirstAncestorWhichIsA("Model") and O:FindFirstAncestorWhichIsA("Model"):FindFirstChild("Humanoid")) then
+                antilagMaterials[O] = O.Material; O.Material = Enum.Material.SmoothPlastic
+            elseif O:IsA("Decal") or O:IsA("Texture") then
+                table.insert(antilagDecalsTextures, {Object = O, Parent = O.Parent}); O.Parent = nil
+            elseif (O:IsA("ParticleEmitter") or O:IsA("Smoke") or O:IsA("Fire") or O:IsA("Sparkles")) and O.Enabled then
+                table.insert(antilagParticles, {Object = O, Enabled = O.Enabled}); O.Enabled = false
+            end
+        end)
+    end
+end
+
+function Antilag:Restore()
+    for O, mat in pairs(antilagMaterials) do pcall(function() if O and O.Parent then O.Material = mat end end) end
+    for _, d in pairs(antilagDecalsTextures) do pcall(function() if d.Object and d.Parent then d.Object.Parent = d.Parent end end) end
+    for _, p in pairs(antilagParticles) do pcall(function() if p.Object and p.Object.Parent then p.Object.Enabled = p.Enabled end end) end
+    antilagMaterials = {}; antilagDecalsTextures = {}; antilagParticles = {}
+end
+
+function Antilag:HandleNew(d)
+    if not antilagEnabled then return end
+    pcall(function()
+        if d:IsA("BasePart") and not (d:FindFirstAncestorWhichIsA("Model") and d:FindFirstAncestorWhichIsA("Model"):FindFirstChild("Humanoid")) then
+            antilagMaterials[d] = d.Material; d.Material = Enum.Material.SmoothPlastic
+        elseif d:IsA("Decal") or d:IsA("Texture") then
+            table.insert(antilagDecalsTextures, {Object = d, Parent = d.Parent}); d.Parent = nil
+        elseif (d:IsA("ParticleEmitter") or d:IsA("Smoke") or d:IsA("Fire") or d:IsA("Sparkles")) and d.Enabled then
+            table.insert(antilagParticles, {Object = d, Enabled = d.Enabled}); d.Enabled = false
+        end
+    end)
+end
+
+function Antilag:Enable()
+    if antilagEnabled then return end; antilagEnabled = true
+    self:SaveAndApply()
+    if antilagConnection then antilagConnection:Disconnect() end
+    antilagConnection = workspace.DescendantAdded:Connect(function(d) self:HandleNew(d) end)
+end
+
+function Antilag:Disable()
+    if not antilagEnabled then return end; antilagEnabled = false
+    if antilagConnection then antilagConnection:Disconnect(); antilagConnection = nil end
+    self:Restore()
+end
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local Stats = game:GetService("Stats")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Debris = game:GetService("Debris")
+local LocalPlayer = Players.LocalPlayer
+local Alive = workspace:WaitForChild("Alive")
+local Runtime = workspace:FindFirstChild("Runtime")
+local Balls = workspace:FindFirstChild("Balls")
+local TrainingBalls = workspace:FindFirstChild("TrainingBalls")
+local pg = LocalPlayer:WaitForChild("PlayerGui")
+local UIS = UserInputService
+
+-- Shared state
+local revertedRemotes = {}
+local hasData = false
+local serverFireCounter = 0
+local Parries = 0
+local Closest_Entity = nil
+local Speed_Divisor_Multiplier = 1.1
+local ParryThreshold = 1
+local Infinity = false
+local firstParryDone = false
+local recentVels = {}
+local lastStableTime = tick()
+local smoothRadians = 0
+local lobbySpamDB = 0
+
+local det = {
+    __last_warping = tick(),
+    __lerp_radians = 0,
+    __curving = tick(),
+    __aerodynamic_time = tick()
+}
+
+Sys = {
+    __parried = false,
+    __training_parried = false,
+    __antidot_parried = false,
+    __grab_animation = nil,
+    __play_animation = false,
+    __curve_mode = 1,
+    __infinity_active = false,
+    __deathslash_active = false,
+    __timehole_active = false,
+    __tornado_time = tick(),
+    __spam_target = nil,
+    __spam_target_time = 0,
+    __last_closest = tick(),
+    __auto_spam_enabled = false,
+    __first_parry_done = false
+}
+
+setfpscap(9999)
+
+local remote, f_raw = nil, nil
+local c = {nil, nil, nil, nil, nil, nil, nil}
+local spamActive = false
+local lastSpamTime = 0
+local spamInterval = 1/875
+local remoteHooked = false
+local spamHeartbeatConn = nil
+local spamInputConn = nil
+local spamGui = nil
+
+local mt = getrawmetatable(game)
+local old = mt.__index
+setreadonly(mt, false)
+mt.__index = newcclosure(function(self, key)
+    if key == "FireServer" or key == "InvokeServer" then
+        return function(instance, ...)
+            local args = {...}
+            if #args >= 4 then
+                if not remoteHooked then remoteHooked = true end
+                remote = instance
+                f_raw = old(instance, "FireServer")
+                for i = 1, 7 do c[i] = args[i] end
+            end
+            return old(self, key)(instance, ...)
+        end
+    end
+    return old(self, key)
+end)
+setreadonly(mt, true)
+
+local function fireParry()
+    if not (remote and f_raw) then return end
+    local cam = workspace.CurrentCamera
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    local camCF = cam.CFrame
+    local viewportSize = cam.ViewportSize
+    local mousePos = {viewportSize.X / 2, viewportSize.Y / 2}
+    local events = {}
+    if workspace:FindFirstChild("Alive") then
+        for _, v in ipairs(workspace.Alive:GetChildren()) do
+            if v ~= char and v.PrimaryPart then
+                local screenPos, isOnScreen = cam:WorldToScreenPoint(v.PrimaryPart.Position)
+                if isOnScreen then
+                    events[tostring(v)] = screenPos
+                end
+            end
+        end
+    end
+    c[3] = camCF.LookVector
+    c[4] = camCF
+    c[5] = events
+    c[6] = mousePos
+    pcall(function()
+        f_raw(remote, unpack(c))
+    end)
+end
+
+local function createManualSpamUI()
+    if spamGui then return end
+    
+    spamGui = Instance.new("ScreenGui")
+    spamGui.Name = "ManualSpamUI"
+    spamGui.ResetOnSpawn = false
+
+    local success = pcall(function()
+        local test = Instance.new("ScreenGui")
+        test.Parent = game:GetService("CoreGui")
+        test:Destroy()
+    end)
+    if success then
+        spamGui.Parent = game:GetService("CoreGui")
+    else
+        spamGui.Parent = LocalPlayer:WaitForChild("PlayerGui")
+    end
+
+    local frame = Instance.new("Frame")
+    frame.Name = "MainFrame"
+    frame.Size = UDim2.new(0, 150, 0, 70)
+    frame.Position = UDim2.new(0.5, -75, 0.5, -35)
+    frame.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+    frame.BackgroundTransparency = 0
+    frame.BorderSizePixel = 0
+    frame.Active = true
+    frame.Draggable = true
+    frame.Parent = spamGui
+
+    local uiCorner = Instance.new("UICorner")
+    uiCorner.CornerRadius = UDim.new(0, 16)
+    uiCorner.Parent = frame
+
+    local uiStroke = Instance.new("UIStroke")
+    uiStroke.Thickness = 3
+    uiStroke.Color = Color3.fromRGB(255, 105, 180)
+    uiStroke.Parent = frame
+
+    local button = Instance.new("TextButton")
+    button.Name = "SpamButton"
+    button.Text = "Spam"
+    button.Size = UDim2.new(0, 120, 0, 40)
+    button.Position = UDim2.new(0.5, -60, 0.5, -20)
+    button.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+    button.BorderSizePixel = 0
+    button.Font = Enum.Font.GothamSemibold
+    button.TextColor3 = Color3.fromRGB(255, 105, 180)
+    button.TextSize = 20
+    button.Parent = frame
+
+    local btnCorner = Instance.new("UICorner")
+    btnCorner.CornerRadius = UDim.new(0, 10)
+    btnCorner.Parent = button
+
+    local activated = false
+    button.MouseButton1Click:Connect(function()
+        activated = not activated
+        button.Text = activated and "Stop" or "Spam"
+        button.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+        spamActive = activated
+    end)
+
+    if spamInputConn then spamInputConn:Disconnect() end
+    spamInputConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if not gameProcessed and input.KeyCode == Enum.KeyCode.E then
+            activated = not activated
+            button.Text = activated and "Stop" or "Spam"
+            button.BackgroundColor3 = Color3.fromRGB(128, 128, 128)
+            spamActive = activated
+        end
+    end)
+    
+    if spamHeartbeatConn then spamHeartbeatConn:Disconnect() end
+    spamHeartbeatConn = RunService.Heartbeat:Connect(function()
+        if spamActive and remote and f_raw then
+            local now = tick()
+            if now - lastSpamTime >= spamInterval then
+                lastSpamTime = now
+                fireParry()
+            end
+        end
+    end)
+    
+    task.spawn(function()
+        while not remoteHooked do
+            task.wait(0.1)
+        end
+    end)
+end
+
+local function destroyManualSpamUI()
+    spamActive = false
+    if spamHeartbeatConn then
+        spamHeartbeatConn:Disconnect()
+        spamHeartbeatConn = nil
+    end
+    if spamInputConn then
+        spamInputConn:Disconnect()
+        spamInputConn = nil
+    end
+    if spamGui then
+        pcall(function() spamGui:Destroy() end)
+        spamGui = nil
+    end
+end
+
+local function isValidArgs(a)
+    return #a == 7 and type(a[2]) == "string" and type(a[3]) == "number" and typeof(a[4]) == "CFrame" and type(a[5]) == "table" and type(a[6]) == "table" and type(a[7]) == "boolean"
+end
+
+task.spawn(function()
+    pcall(function()
+        local mt2 = getrawmetatable(game)
+        local old2 = mt2.__index
+        setreadonly(mt2, false)
+        mt2.__index = newcclosure(function(self, key)
+            if key == "FireServer" and self:IsA("RemoteEvent") then
+                return newcclosure(function(_, ...)
+                    local a = { ... }
+                    if isValidArgs(a) or self.Name:find("Parry") then
+                        revertedRemotes[self] = a
+                        if not hasData then hasData = true end
+                    end
+                    return old2(self, key)(self, ...)
+                end)
+            end
+            return old2(self, key)
+        end)
+        setreadonly(mt2, true)
+    end)
+end)
+
+local function riverGetBall()
+    local balls = workspace:FindFirstChild("Balls")
+    if not balls then return nil end
+    for _, ball in pairs(balls:GetChildren()) do
+        if ball:GetAttribute("realBall") then ball.CanCollide = false; return ball end
+    end
+    return nil
+end
+
+local function riverGetBalls()
+    local t = {}; local balls = workspace:FindFirstChild("Balls")
+    if not balls then return t end
+    for _, ball in pairs(balls:GetChildren()) do
+        if ball:GetAttribute("realBall") then ball.CanCollide = false; table.insert(t, ball) end
+    end
+    return t
+end
+
+local lastClosestCheck = 0
+local function riverGetClosest()
+    local now = tick()
+    if now - lastClosestCheck < 0.1 then return Closest_Entity end
+    lastClosestCheck = now; local maxD = math.huge; local found = nil
+    if not Alive then return nil end
+    for _, e in pairs(Alive:GetChildren()) do
+        if e ~= LocalPlayer.Character and e.PrimaryPart then
+            local d = LocalPlayer:DistanceFromCharacter(e.PrimaryPart.Position)
+            if d < maxD then maxD = d; found = e end
+        end
+    end
+    Closest_Entity = found; return found
+end
+
+local function riverGetClosestToCursor()
+    if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then return nil end
+    local closest = nil; local minDot = -math.huge; local cam = workspace.CurrentCamera
+    if not Alive then return nil end
+    local ok, ml = pcall(function() return UserInputService:GetMouseLocation() end)
+    if not ok then return nil end
+    local ray = cam:ScreenPointToRay(ml.X, ml.Y)
+    local ptr = CFrame.lookAt(ray.Origin, ray.Origin + ray.Direction)
+    for _, player in pairs(Alive:GetChildren()) do
+        if player == LocalPlayer.Character then continue end
+        if not player:FindFirstChild("HumanoidRootPart") then continue end
+        local dir = (player.HumanoidRootPart.Position - cam.CFrame.Position).Unit
+        local dot = ptr.LookVector:Dot(dir)
+        if dot > minDot then minDot = dot; closest = player end
+    end
+    return closest
+end
+
+local function riverGetCFrame()
+    local cam = workspace.CurrentCamera; local root = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return cam.CFrame end
+    local closest = riverGetClosestToCursor()
+    local targetPart = closest and closest:FindFirstChild("HumanoidRootPart")
+    local targetPos = targetPart and targetPart.Position or (root.Position + cam.CFrame.LookVector * 100)
+    local funcs = {
+        function() return cam.CFrame end,
+        function()
+            local dir = (targetPos - root.Position).Unit; local offset; local attempts = 0
+            repeat
+                offset = Vector3.new(math.random(-4000, 4000), math.random(-4000, 4000), math.random(-4000, 4000))
+                local cd = (targetPos + offset - root.Position).Unit; local dot = dir:Dot(cd); attempts = attempts + 1
+            until dot < 0.95 or attempts > 10
+            return CFrame.new(root.Position, targetPos + offset)
+        end,
+        function() return CFrame.new(root.Position, targetPos + Vector3.new(0, 5, 0)) end,
+        function() local dir = (root.Position - targetPos).Unit; local bp = root.Position + dir * 10000 + Vector3.new(0, 1000, 0); return CFrame.new(cam.CFrame.Position, bp) end,
+        function() return CFrame.new(root.Position, targetPos + Vector3.new(0, -9e18, 0)) end,
+        function() return CFrame.new(root.Position, targetPos + Vector3.new(0, 9e18, 0)) end
+    }
+    return funcs[Sys.__curve_mode]()
+end
+
+local function riverPlayAnim()
+    if not Sys.__play_animation then return end
+    local char = LocalPlayer.Character; if not char then return end
+    local hum = char:FindFirstChildOfClass("Humanoid"); local anim = hum and hum:FindFirstChildOfClass("Animator")
+    if not hum or not anim then return end
+    local swordName = char:GetAttribute("CurrentlyEquippedSword"); if not swordName then return end
+    pcall(function()
+        local swordAPI = ReplicatedStorage.Shared.SwordAPI.Collection; local parryAnim = swordAPI.Default:FindFirstChild("GrabParry")
+        if not parryAnim then return end
+        local swordData = ReplicatedStorage.Shared.ReplicatedInstances.Swords.GetSword:Invoke(swordName)
+        if not swordData or not swordData.AnimationType then return end
+        for _, obj in pairs(swordAPI:GetChildren()) do
+            if obj.Name == swordData.AnimationType then
+                local at = obj:FindFirstChild("GrabParry") and "GrabParry" or "Grab"
+                if obj:FindFirstChild(at) then parryAnim = obj[at] end
+            end
+        end
+        if Sys.__grab_animation and Sys.__grab_animation.IsPlaying then Sys.__grab_animation:Stop() end
+        Sys.__grab_animation = anim:LoadAnimation(parryAnim)
+        Sys.__grab_animation.Priority = Enum.AnimationPriority.Action4; Sys.__grab_animation:Play()
+    end)
+end
+
+local doFire = function()
+    if not LocalPlayer.Character then return end
+    local cam = workspace.CurrentCamera; local ok, mouse = pcall(function() return UserInputService:GetMouseLocation() end)
+    if not ok then return end
+    local vec2 = { mouse.X, mouse.Y }; local eventData = {}
+    if Alive then
+        for _, e in pairs(Alive:GetChildren()) do
+            if e.PrimaryPart then pcall(function() local sp = cam:WorldToScreenPoint(e.PrimaryPart.Position); eventData[e.Name] = sp end) end
+        end
+    end
+    local cf = riverGetCFrame()
+    if not Sys.__first_parry_done then
+        pcall(function() for _, conn in pairs(getconnections(LocalPlayer.PlayerGui.Hotbar.Block.Activated)) do conn:Fire() end end)
+        Sys.__first_parry_done = true; serverFireCounter = serverFireCounter + 1; return
+    end
+    for rem, args in pairs(revertedRemotes) do
+        local modified = { args[1], args[2], args[3], cf, eventData, vec2, args[7] }
+        pcall(function()
+            if rem:IsA("RemoteEvent") then rem:FireServer(table.unpack(modified))
+            elseif rem:IsA("RemoteFunction") then rem:InvokeServer(table.unpack(modified)) end
+        end)
+    end
+    serverFireCounter = serverFireCounter + 1
+    if Parries < 10000 then
+        Parries = Parries + 1
+        task.delay(0.5, function() if Parries > 0 then Parries = Parries - 1 end end)
+    end
+end
+
+local autoParryEnabled = false
+local autoParryConnection = nil
+
+local function linearPredict(a, b, t) return a + (b - a) * t end
+
+local function isCurvedMixed()
+    local ball = nil
+    if Balls then for _, v in ipairs(Balls:GetChildren()) do if v:GetAttribute("realBall") then ball = v; break end end end
+    if not ball then return false end
+    local zoomies = ball:FindFirstChild("zoomies"); if not zoomies then return false end
+    local currentVel = zoomies.VectorVelocity; table.insert(recentVels, currentVel)
+    if #recentVels > 4 then table.remove(recentVels, 1) end
+    local speed = currentVel.Magnitude; if speed < 1 or speed > 9000 then return false end
+    local avgVel = currentVel
+    if #recentVels > 1 then local sum = Vector3.zero; for _, v in ipairs(recentVels) do sum = sum + v end; avgVel = sum / #recentVels end
+    local ballDir = avgVel.Unit; local char = LocalPlayer.Character
+    if not char or not char.PrimaryPart then return false end
+    local pos = char.PrimaryPart.Position; local direction = (pos - ball.Position).Unit; local dot = direction:Dot(ballDir)
+    if dot >= 0.95 then return false end
+    local pingRaw = Stats.Network.ServerStatsItem["Data Ping"]:GetValue(); local pingS = pingRaw / 1000
+    local distance = (pos - ball.Position).Magnitude; local reachTime = distance / speed - pingS
+    local speedThreshold = math.min(speed / 100, 45); local ballDistThreshold = 15 - math.min(distance / 1000, 15) + speedThreshold
+    if speed > 100 and reachTime > pingRaw / 10 then ballDistThreshold = math.max(ballDistThreshold - 15, 15) end
+    if distance < ballDistThreshold * 0.85 then return false end
+    local dirDiff = (ballDir - avgVel).Unit; local dirSim = direction:Dot(dirDiff); local dotDiff = dot - dirSim
+    local dotThresholdRiver = math.clamp(0.55 - (pingS * 0.75), -1, 0.45); local dotThresholdAllusive = 0.5 - pingS
+    local dotThreshold = dotThresholdRiver * 0.55 + dotThresholdAllusive * 0.45; local visualThresh = 0.12
+    if avgVel.Magnitude > 150 then visualThresh = visualThresh - 0.02 end
+    if dotDiff < math.min(dotThreshold, visualThresh) then lastStableTime = tick(); return true end
+    local clampedDot = math.clamp(dot, -1, 1); local radiansRiver = math.asin(clampedDot); local radiansAllusive = math.rad(math.asin(clampedDot))
+    local blendedRadians = radiansRiver * 0.6 + radiansAllusive * 0.4
+    det.__lerp_radians = linearPredict(det.__lerp_radians, blendedRadians, 0.83); smoothRadians = linearPredict(smoothRadians, radiansAllusive, 0.85)
+    if det.__lerp_radians < 0.017 then det.__last_warping = tick() end; if smoothRadians < 0.015 then lastStableTime = tick() end
+    if (tick() - lastStableTime) < 0.07 then return true end; if (tick() - det.__last_warping) < (reachTime / 1.45) then return true end
+    if (tick() - det.__curving) < (reachTime / 1.2) then return true end
+    if #recentVels == 4 then
+        local iDiff1 = (ballDir - recentVels[1].Unit).Unit; local d1 = dot - direction:Dot(iDiff1)
+        local iDiff2 = (ballDir - recentVels[2].Unit).Unit; local d2 = dot - direction:Dot(iDiff2)
+        if d1 < visualThresh or d2 < visualThresh then return true end
+    end
+    return dot < dotThreshold
+end
+
+local function isParryOnCooldown()
+    local result = false
+    pcall(function()
+        local hotbar = LocalPlayer.PlayerGui:FindFirstChild("Hotbar"); if not hotbar then return end
+        local block = hotbar:FindFirstChild("Block"); if not block then return end
+        local parryGrad = block:FindFirstChildOfClass("UIGradient")
+        if parryGrad and parryGrad.Offset.Y < 0.4 then result = true; return end
+    end)
+    return result
+end
+
+pcall(function()
+    ReplicatedStorage.Remotes.ParrySuccessAll.OnClientEvent:Connect(function(_, root)
+        if root and root.Parent and root.Parent ~= LocalPlayer.Character then if not Alive or root.Parent.Parent ~= Alive then return end end
+        local ball = nil; if Balls then for _, v in ipairs(Balls:GetChildren()) do if v:GetAttribute("realBall") then ball = v; break end end end
+        if not ball then return end; local zoomies = ball:FindFirstChild("zoomies")
+        if zoomies then local dir = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Unit; local dot = dir:Dot(zoomies.VectorVelocity.Unit); if dot < 0.5 then det.__curving = tick(); lastStableTime = tick() end end
+    end)
+end)
+
+pcall(function() ReplicatedStorage.Remotes.InfinityBall.OnClientEvent:Connect(function(a, b) Infinity = b or false; Sys.__infinity_active = b or false end) end)
+pcall(function() ReplicatedStorage.Remotes.DeathBall.OnClientEvent:Connect(function(c, d) Sys.__deathslash_active = d or false end) end)
+pcall(function() ReplicatedStorage.Packages._Index["sleitnick_net@0.1.0"].net["RE/TimeHoleActivate"].OnClientEvent:Connect(function(...) local args = { ... }; local p = args[1]; if p == LocalPlayer or p == LocalPlayer.Name or (p and p.Name == LocalPlayer.Name) then Sys.__timehole_active = true end end) end)
+pcall(function() ReplicatedStorage.Packages._Index["sleitnick_net@0.1.0"].net["RE/TimeHoleDeactivate"].OnClientEvent:Connect(function() Sys.__timehole_active = false end) end)
+
+local parriedBalls = {}
+
+local function CombinedParryLoop()
+    if autoParryEnabled and LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
+        local balls = riverGetBalls()
+        local trainingBall = nil
+        if TrainingBalls then for _, v in ipairs(TrainingBalls:GetChildren()) do if v:GetAttribute("realBall") then trainingBall = v; break end end end
+
+        for _, ball in ipairs(balls) do
+            if not ball then continue end
+            local zoomies = ball:FindFirstChild("zoomies"); if not zoomies then continue end
+
+            local ballId = ball:GetDebugId()
+
+            ball:GetAttributeChangedSignal("target"):Once(function()
+                Sys.__parried = false; Sys.__antidot_parried = false
+                parriedBalls[ballId] = nil
+            end)
+
+            if parriedBalls[ballId] then continue end
+
+            local ballTarget = ball:GetAttribute("target")
+            local velocity = zoomies.VectorVelocity; local distance = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Magnitude
+            local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue(); local pingThreshold = math.clamp(ping / 10, 5, 17)
+            local speed = velocity.Magnitude; if speed <= 0 then continue end
+
+            local cappedSpeedDiff = math.min(math.max(speed - 9.5, 0), 650)
+            local speedDivisor = (2.5 + cappedSpeedDiff * 0.002) * Speed_Divisor_Multiplier
+            local parryAccuracy = pingThreshold + math.max(speed / speedDivisor, 9.5)
+            parryAccuracy = parryAccuracy + math.clamp(ping / 1000 * speed, 0, 30)
+            if speed > 1500 then local m = 1 + (speed - 1500) / 1000; parryAccuracy = parryAccuracy * math.clamp(m, 1.5, 3.5) end
+
+            local dirToPlayer = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Unit
+            local dotToPlayer = dirToPlayer:Dot(velocity.Unit)
+            if ballTarget ~= LocalPlayer.Name and dotToPlayer < 0.1 then continue end
+
+            if ball:FindFirstChild("AeroDynamicSlashVFX") then pcall(function() ball.AeroDynamicSlashVFX:Destroy() end); det.__aerodynamic_time = tick() end
+            if Runtime and Runtime:FindFirstChild("Tornado") then local tornadoTime = (Runtime.Tornado:GetAttribute("TornadoTime") or 1) + 0.314159; if (tick() - Sys.__tornado_time) < tornadoTime then continue end end
+            if isCurvedMixed() and ballTarget == LocalPlayer.Name then continue end
+            if ball:FindFirstChild("ComboCounter") then continue end
+            if LocalPlayer.Character.PrimaryPart:FindFirstChild("SingularityCape") then continue end
+            if Sys.__infinity_active then continue end
+            if isParryOnCooldown() then continue end
+
+            local closestPlayer = riverGetClosest()
+            if closestPlayer and not Sys.__antidot_parried then
+                local playerDist = (LocalPlayer.Character.PrimaryPart.Position - closestPlayer.PrimaryPart.Position).Magnitude
+                if playerDist <= 30 and dotToPlayer > 0.75 then
+                    if ballTarget == LocalPlayer.Name and distance <= 30 then
+                        doFire(); parriedBalls[ballId] = true; Sys.__antidot_parried = true
+                    end
+                end
+            end
+
+            if ballTarget == LocalPlayer.Name and distance <= parryAccuracy then
+                doFire(); parriedBalls[ballId] = true
+            end
+        end
+
+        if trainingBall then
+            local tz = trainingBall:FindFirstChild("zoomies")
+            if tz then
+                local tbId = trainingBall:GetDebugId()
+                trainingBall:GetAttributeChangedSignal("target"):Once(function() Sys.__training_parried = false; parriedBalls[tbId] = nil end)
+                if not parriedBalls[tbId] then
+                    local bt = trainingBall:GetAttribute("target"); local spd = tz.VectorVelocity.Magnitude
+                    local dist = LocalPlayer:DistanceFromCharacter(trainingBall.Position)
+                    local ping2 = Stats.Network.ServerStatsItem["Data Ping"]:GetValue(); local pingT = math.clamp(ping2 / 10, 5, 17)
+                    local csd = math.min(math.max(spd - 9.5, 0), 650); local spdDiv = (2.5 + csd * 0.002) * Speed_Divisor_Multiplier
+                    local pa = pingT + math.max(spd / spdDiv, 9.5) + math.clamp(ping2 / 1000 * spd, 0, 30)
+                    if spd > 1500 then local m2 = 1 + (spd - 1500) / 1000; pa = pa * math.clamp(m2, 1.5, 3.5) end
+                    if bt == LocalPlayer.Name and dist <= pa then doFire(); parriedBalls[tbId] = true end
+                end
+            end
+        end
+    end
+
+    if autoParryEnabled and LocalPlayer.Character and LocalPlayer.Character.PrimaryPart then
+        if not Alive or LocalPlayer.Character.Parent ~= Alive then return end
+        local now = tick()
+        if now - (Sys.__last_spam_check or 0) < 0.008 then return end
+        Sys.__last_spam_check = now
+        local ball = nil
+        if Balls then for _, v in ipairs(Balls:GetChildren()) do if v:GetAttribute("realBall") then ball = v; break end end end
+        if not ball then return end; local zoomies = ball:FindFirstChild("zoomies"); if not zoomies then return end
+        if now - (Sys.__target_check_time or 0) > 0.1 then
+            Sys.__target_check_time = now; local ce = riverGetClosest()
+            if ce then
+                if Sys.__spam_target then
+                    if not Sys.__spam_target.Parent or not Sys.__spam_target:FindFirstChild("Humanoid") or Sys.__spam_target.Humanoid.Health <= 0 then Sys.__spam_target = nil end
+                end
+                if not Sys.__spam_target or (now - (Sys.__spam_target_time or 0) > 1) then Sys.__spam_target = ce; Sys.__spam_target_time = now end
+            end
+        end
+        local ballTarget = ball:GetAttribute("target"); if not ballTarget then return end
+        local vel = ball.AssemblyLinearVelocity or Vector3.zero; local speed = vel.Magnitude; if speed < 5 then return end
+        local hr = LocalPlayer.Character.PrimaryPart; local dir = (hr.Position - ball.Position).Unit; local dot = dir:Dot(vel.Unit)
+        local ping = Stats.Network.ServerStatsItem["Data Ping"]:GetValue(); local pingThreshold = math.clamp(ping / 10, 1, 16)
+        local maxSpamDist = pingThreshold + math.min(speed / 6, 95); local maxSpeed = 5 - math.min(speed / 5, 5); local maxDot = math.clamp(dot, -1, 0) * maxSpeed; local spamAcc = maxSpamDist - maxDot
+        local entity = Closest_Entity; if not entity or not entity.PrimaryPart then return end
+        local entityDist = (hr.Position - entity.PrimaryPart.Position).Magnitude; local ballDist = LocalPlayer:DistanceFromCharacter(ball.Position); local targetDist = LocalPlayer:DistanceFromCharacter(entity.PrimaryPart.Position)
+        if entityDist > maxSpamDist or ballDist > spamAcc or targetDist > maxSpamDist then return end
+        if ballTarget == LocalPlayer.Name and targetDist > 30 and ballDist > 30 then return end
+        if LocalPlayer.Character:GetAttribute("Pulsed") then return end
+        local spamTarget = Sys.__spam_target; if not spamTarget then return end
+        if ballTarget ~= spamTarget.Name and ballTarget ~= LocalPlayer.Name then return end
+        if targetDist <= spamAcc and ballDist <= spamAcc then
+            if Parries >= ParryThreshold then
+                doFire()
+                if Sys.__play_animation then riverPlayAnim() end
+            end
+        end
+    end
+end
+
+local function SetAutoParryConnection()
+    if autoParryConnection then autoParryConnection:Disconnect(); autoParryConnection = nil end
+    if autoParryEnabled then autoParryConnection = RunService.RenderStepped:Connect(CombinedParryLoop) end
+end
+
+local lobbySpamEnabled = false
+RunService.Heartbeat:Connect(function()
+    pcall(function()
+        if not lobbySpamEnabled then return end; local now = tick()
+        if (now - lobbySpamDB) < 0.06 then return end
+        if not TrainingBalls then TrainingBalls = workspace:FindFirstChild("TrainingBalls") end; if not TrainingBalls then return end
+        local ball = nil; for _, v in ipairs(TrainingBalls:GetChildren()) do if v:GetAttribute("realBall") then ball = v; break end end
+        if not ball then return end; local tz = ball:FindFirstChild("zoomies"); if not tz then return end
+        local spd = tz.VectorVelocity.Magnitude; local dist = LocalPlayer:DistanceFromCharacter(ball.Position)
+        local ping2 = Stats.Network.ServerStatsItem["Data Ping"]:GetValue() / 10; local pingT = math.clamp(ping2 / 10, 5, 17)
+        local csd = math.min(math.max(spd - 9.5, 0), 650); local spdDiv = (2.5 + csd * 0.002) * Speed_Divisor_Multiplier; local acc = pingT + math.max(spd / spdDiv, 9.5)
+        if spd > 2000 then acc = acc * 2.0 end; local bt = ball:GetAttribute("target")
+        if bt == LocalPlayer.Name and dist <= acc then lobbySpamDB = now; doFire() end
+    end)
+end)
+
+local CombatTab = Window:Tab({
+    Title = "Combat",
+    Icon = "sword",
+    Height = 300,
+    Color = Color3.fromRGB(255, 50, 50)
+})
+
+CombatTab:Section({ Title = "ANTI LAG" })
+
+CombatTab:Toggle({
+    Title = "Anti Lag",
+    Desc = "Reduces lag by removing visual effects",
+    Icon = "zap",
+    Type = "Switch",
+    Value = false,
+    Callback = function(v) if v then Antilag:Enable() else Antilag:Disable() end end
+})
+
+CombatTab:Section({ Title = "AUTO PARRY" })
+
+CombatTab:Toggle({
+    Title = "Auto Parry",
+    Desc = "Automatically parries ball + spam when enemy close",
+    Icon = "shield",
+    Type = "Switch",
+    Value = false,
+    Callback = function(value)
+        autoParryEnabled = value; SetAutoParryConnection()
+        print
+    end
+})
+
+CombatTab:Toggle({
+    Title = "Manual Spam Parry Ui",
+    Desc = "Spam parry manual - nhấn E hoặc click nút UI",
+    Icon = "zap",
+    Type = "Switch",
+    Value = false,
+    Callback = function(enabled)
+        if enabled then
+            createManualSpamUI()
+            print("[Manual Spam]
+        else
+            destroyManualSpamUI()
+            print("[Manual Spam] 
+        end
+    end
+})
+
+CombatTab:Slider({
+    Title = "Parry Accuracy",
+    Desc = "Higher = more accurate (1-100)", Icon = "target",
+    Min = 1, Max = 100, Default = 100, Rounding = 1,
+    Callback = function(value) Speed_Divisor_Multiplier = 0.59 + (value - 1) * (3 / 99) end
+})
+
+CombatTab:Slider({
+    Title = "Spam Threshold",
+    Desc = "Min parry count before spam fires (1-3)", Icon = "trending-up",
+    Min = 1, Max = 3, Default = 1, Rounding = 1,
+    Callback = function(value) ParryThreshold = value end
+})
+
+CombatTab:Toggle({
+    Title = "Play Animation",
+    Desc = "Play parry animation", Icon = "film",
+    Type = "Switch", Value = true,
+    Callback = function(value) Sys.__play_animation = value end
+})
+
+CombatTab:Label({ Text = "" })
+
+print
