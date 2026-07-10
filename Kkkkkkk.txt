@@ -1,0 +1,1117 @@
+setfpscap(9999)
+repeat task.wait() until game:IsLoaded()
+
+local Parry_Animation_API
+do
+    local success, result = pcall(function()
+        return loadstring(game:HttpGet('https://raw.githubusercontent.com/Lose1s/Module_Wrapper/refs/heads/main/Parry_Animation.lua'))()
+    end)
+    if success then
+        Parry_Animation_API = result
+    else
+        Parry_Animation_API = nil
+    end
+end
+
+local ParryRemotes = {}
+local oldIndex
+if typeof(hookmetamethod) == "function" then
+    oldIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+        if (key == "FireServer" and self:IsA("RemoteEvent")) or (key == "InvokeServer" and self:IsA("RemoteFunction")) then
+            return function(_, ...)
+                local args = {...}
+                if #args == 7 and type(args[2]) == "string" and type(args[3]) == "number" then
+                    ParryRemotes[self] = args
+                end
+                return oldIndex(self, key)(_, unpack(args))
+            end
+        end
+        return oldIndex(self, key)
+    end))
+end
+
+local BallsFolder = workspace:WaitForChild("Balls", 9e9)
+local ballStates = {}
+local ACCURACY_FACTOR = 1.285
+local statsPingItem = game:GetService("Stats").Network.ServerStatsItem["Data Ping"]
+local RunService = game:GetService("RunService")
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local VIM = game:GetService("VirtualInputManager")
+local player = Players.LocalPlayer
+
+local function InitBallState(ball)
+    if ball:GetAttribute("realBall") then
+        ballStates[ball] = { parried = false }
+        ball:GetAttributeChangedSignal("target"):Connect(function()
+            if ballStates[ball] then ballStates[ball].parried = false end
+        end)
+    end
+end
+BallsFolder.ChildAdded:Connect(InitBallState)
+BallsFolder.ChildRemoved:Connect(function(ball)
+    ballStates[ball] = nil
+    ballPrevVelocity[ball] = nil
+    antiCurveData[ball] = nil
+end)
+for _, ball in ipairs(BallsFolder:GetChildren()) do InitBallState(ball) end
+
+local curveMethod = "camera"
+
+local function ExecuteParry()
+    local camera = workspace.CurrentCamera
+    local cameraCFrame = camera and camera.CFrame or CFrame.new()
+
+    if curveMethod == "upwards" then
+        local look = cameraCFrame.LookVector
+        local upDir = Vector3.new(look.X, 10, look.Z).Unit
+        cameraCFrame = CFrame.new(cameraCFrame.Position, cameraCFrame.Position + upDir)
+    elseif curveMethod == "backwards" then
+        cameraCFrame = CFrame.lookAt(cameraCFrame.Position, cameraCFrame.Position - cameraCFrame.LookVector)
+    elseif curveMethod == "random" then
+        local randomDir = Vector3.new(
+            math.random(-1000, 1000) * 0.001,
+            math.random(-350, 1000) * 0.001,
+            math.random(-1000, 1000) * 0.001
+        ).Unit
+        cameraCFrame = CFrame.new(cameraCFrame.Position, cameraCFrame.Position + randomDir)
+    end
+
+    if next(ParryRemotes) then
+        for remote, originalArgs in pairs(ParryRemotes) do
+            local modifiedArgs = {
+                originalArgs[1],
+                originalArgs[2],
+                0,
+                cameraCFrame,
+                originalArgs[5],
+                originalArgs[6]
+            }
+            if remote:IsA("RemoteEvent") then
+                remote:FireServer(unpack(modifiedArgs))
+            elseif remote:IsA("RemoteFunction") then
+                remote:InvokeServer(unpack(modifiedArgs))
+            end
+        end
+    else
+        VIM:SendMouseButtonEvent(0, 0, 0, true, game, 0)
+        VIM:SendMouseButtonEvent(0, 0, 0, false, game, 0)
+    end
+
+    if Parry_Animation_API then
+        pcall(function()
+            if type(Parry_Animation_API) == "function" then
+                Parry_Animation_API()
+            elseif type(Parry_Animation_API) == "table" and Parry_Animation_API.Play then
+                Parry_Animation_API:Play()
+            end
+        end)
+    end
+    return true
+end
+
+local manualSpamRunning = false
+local manualSpamThread = nil
+
+local function StartManualSpam()
+    if manualSpamThread then return end
+    manualSpamRunning = true
+    manualSpamThread = task.spawn(function()
+        while manualSpamRunning do
+            local startTime = tick()
+            while tick() - startTime < 1/1000 do
+                RunService.RenderStepped:Wait()
+            end
+            ExecuteParry()
+        end
+        manualSpamThread = nil
+    end)
+end
+
+local function StopManualSpam()
+    manualSpamRunning = false
+    manualSpamThread = nil
+end
+
+local autoSpamRunning = false
+local autoSpamThread = nil
+
+local function StartAutoSpam()
+    if autoSpamThread then return end
+    autoSpamRunning = true
+    autoSpamThread = task.spawn(function()
+        while autoSpamRunning do
+            local startTime = tick()
+            while tick() - startTime < 1/1000 do
+                RunService.RenderStepped:Wait()
+            end
+            ExecuteParry()
+        end
+        autoSpamThread = nil
+    end)
+end
+
+local function StopAutoSpam()
+    autoSpamRunning = false
+    autoSpamThread = nil
+end
+
+local autoParryConnection = nil
+local autoParryEnabled = false
+local aggressiveMode = false
+local autoSpamEnabled = false
+local parryTimes = {}
+local parryCount = 0
+local parryHead = 1
+local ballPrevVelocity = {}
+local antiCurveData = {}
+
+local CURVE_BOOST_FACTOR = 1.3
+local CURVE_ACCEL_THRESHOLD = 60
+local SMOOTH_ALPHA = 0.3
+local CONSISTENT_FRAMES_NEEDED = 3
+
+function recordAutoParry()
+    local now = tick()
+    if parryCount < 5 then
+        parryCount = parryCount + 1
+    else
+        parryHead = (parryHead % 5) + 1
+    end
+    parryTimes[((parryHead + parryCount - 2) % 5) + 1] = now
+end
+
+local function countRecent()
+    local now = tick()
+    local count = 0
+    for i = 1, parryCount do
+        local idx = (parryHead + i - 2) % 5 + 1
+        if now - parryTimes[idx] < 0.5 then
+            count = count + 1
+        end
+    end
+    return count
+end
+
+local function getAntiCurveMultiplier(ball, playerPos, currentVelocity)
+    local prev = ballPrevVelocity[ball]
+    if not prev then
+        ballPrevVelocity[ball] = currentVelocity
+        antiCurveData[ball] = { smoothAx = 0, smoothAy = 0, smoothAz = 0, curveFrames = 0 }
+        return 1.0
+    end
+
+    local ax = currentVelocity.X - prev.X
+    local ay = currentVelocity.Y - prev.Y
+    local az = currentVelocity.Z - prev.Z
+    ballPrevVelocity[ball] = currentVelocity
+
+    local data = antiCurveData[ball]
+    if not data then
+        data = { smoothAx = 0, smoothAy = 0, smoothAz = 0, curveFrames = 0 }
+        antiCurveData[ball] = data
+    end
+
+    data.smoothAx = data.smoothAx * (1 - SMOOTH_ALPHA) + ax * SMOOTH_ALPHA
+    data.smoothAy = data.smoothAy * (1 - SMOOTH_ALPHA) + ay * SMOOTH_ALPHA
+    data.smoothAz = data.smoothAz * (1 - SMOOTH_ALPHA) + az * SMOOTH_ALPHA
+
+    local accelMag = math.sqrt(data.smoothAx*data.smoothAx + data.smoothAy*data.smoothAy + data.smoothAz*data.smoothAz)
+    if accelMag < 0.1 then
+        data.curveFrames = 0
+        return 1.0
+    end
+
+    local dx = playerPos.X - ball.Position.X
+    local dy = playerPos.Y - ball.Position.Y
+    local dz = playerPos.Z - ball.Position.Z
+    local dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+    if dist < 0.01 then
+        data.curveFrames = 0
+        return 1.0
+    end
+
+    local unitToPlayerX = dx / dist
+    local unitToPlayerY = dy / dist
+    local unitToPlayerZ = dz / dist
+
+    local radialAccel = data.smoothAx*unitToPlayerX + data.smoothAy*unitToPlayerY + data.smoothAz*unitToPlayerZ
+    local lateralAccelSq = accelMag*accelMag - radialAccel*radialAccel
+    if lateralAccelSq < 0 then lateralAccelSq = 0 end
+    local lateralAccel = math.sqrt(lateralAccelSq)
+
+    if lateralAccel > CURVE_ACCEL_THRESHOLD and radialAccel > 0 then
+        data.curveFrames = data.curveFrames + 1
+        if data.curveFrames >= CONSISTENT_FRAMES_NEEDED then
+            local severity = math.min(lateralAccel / (CURVE_ACCEL_THRESHOLD * 2), 1.0)
+            return 1.0 + (CURVE_BOOST_FACTOR - 1.0) * severity
+        end
+    else
+        data.curveFrames = 0
+    end
+    return 1.0
+end
+
+local function checkAutoSpam()
+    if not autoSpamEnabled then
+        if aggressiveMode then
+            aggressiveMode = false
+            StopAutoSpam()
+        end
+        return
+    end
+
+    local recent = countRecent()
+    local shouldBeAggressive = (recent >= 3)
+
+    if shouldBeAggressive ~= aggressiveMode then
+        aggressiveMode = shouldBeAggressive
+        if aggressiveMode then
+            StartAutoSpam()
+        else
+            StopAutoSpam()
+        end
+    end
+end
+
+local basePreClick = 1.4
+local maxHorizontalMiss = 5
+
+local function AutoParryLoop()
+    local character = player.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+
+    local playerPos = rootPart.Position
+    local px, py, pz = playerPos.X, playerPos.Y, playerPos.Z
+    local pingMs = statsPingItem:GetValue()
+    local pingFactor = math.clamp(pingMs * 0.01, 1, 20)
+
+    for _, ball in ipairs(BallsFolder:GetChildren()) do
+        if not ball:GetAttribute("realBall") then continue end
+        if ball:GetAttribute("target") ~= player.Name then continue end
+
+        local state = ballStates[ball]
+        if not state then InitBallState(ball); state = ballStates[ball] end
+        if state.parried then continue end
+
+        local zoomies = ball:FindFirstChild("zoomies")
+        if not zoomies then continue end
+        local velVec = zoomies.VectorVelocity
+        local vx, vy, vz = velVec.X, velVec.Y, velVec.Z
+
+        local bx, by, bz = ball.Position.X, ball.Position.Y, ball.Position.Z
+        local dx, dy, dz = px - bx, py - by, pz - bz
+        local distSq = dx*dx + dy*dy + dz*dz
+        if distSq < 1 then continue end
+        local dist = math.sqrt(distSq)
+
+        local approachSpeed = (dx*vx + dy*vy + dz*vz) / dist
+        if approachSpeed <= 0 then continue end
+
+        local horizontalSpeedSq = vx*vx + vz*vz
+        if horizontalSpeedSq > 0.001 then
+            local horizontalMiss = math.abs(dx*vz - dz*vx) / math.sqrt(horizontalSpeedSq)
+            if horizontalMiss > maxHorizontalMiss then continue end
+        end
+
+        local cappedSpeed = math.min(approachSpeed, 650)
+        local baseRadius = 2.4 + cappedSpeed * 0.002
+        local parryRadius = pingFactor + math.max(approachSpeed / (baseRadius * ACCURACY_FACTOR), 9.5)
+        local curveMultiplier = getAntiCurveMultiplier(ball, playerPos, velVec)
+        parryRadius = parryRadius * basePreClick * curveMultiplier
+
+        if dist <= parryRadius then
+            state.parried = true
+            ExecuteParry()
+            recordAutoParry()
+        end
+    end
+
+    checkAutoSpam()
+end
+
+local function SetAutoParryConnection()
+    if autoParryConnection then
+        autoParryConnection:Disconnect()
+        autoParryConnection = nil
+    end
+    if autoParryEnabled then
+        autoParryConnection = RunService.Stepped:Connect(AutoParryLoop)
+    end
+end
+
+local function ToggleAutoParry(on)
+    autoParryEnabled = on
+    SetAutoParryConnection()
+    if not on then
+        StopAutoSpam()
+        aggressiveMode = false
+    end
+end
+
+local Immortality = {
+    Enabled = false,
+    DesyncRadius = 40,
+    DesyncHeight = 100
+}
+
+local desyncCFramePositions = {}
+local currentDesyncRotation = 0
+
+local function GenerateRandomVector(magnitude)
+    return math.random(-magnitude * 90000009292929399949949496000, magnitude * -1e9) / 5e8
+end
+
+task.spawn(function()
+    while true do
+        if Immortality.Enabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            pcall(function()
+                player.Character.HumanoidRootPart:SetNetworkOwner(player)
+            end)
+        end
+        task.wait()
+    end
+end)
+
+RunService.Stepped:Connect(function()
+    if Immortality.Enabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        pcall(function()
+            player.Character.HumanoidRootPart:SetNetworkOwner(player)
+        end)
+    end
+end)
+
+RunService.Heartbeat:Connect(function()
+    if Immortality.Enabled and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+        local rootPart = player.Character.HumanoidRootPart
+        currentDesyncRotation = (currentDesyncRotation + 15) % 360
+        desyncCFramePositions[1] = rootPart.CFrame
+        desyncCFramePositions[2] = rootPart.AssemblyLinearVelocity
+        local desyncForce = 3000
+        local spoofedCF = rootPart.CFrame * CFrame.Angles(0, math.rad(currentDesyncRotation), 0) + Vector3.new(0, Immortality.DesyncHeight, 0)
+        local hWave = math.sin(tick() * 30) * Immortality.DesyncRadius
+        local vWave = math.cos(tick() * 60) * Immortality.DesyncHeight
+        spoofedCF = spoofedCF * CFrame.new(hWave, vWave, 0) * CFrame.Angles(
+            math.rad(GenerateRandomVector(desyncForce)),
+            math.rad(GenerateRandomVector(desyncForce)),
+            0
+        )
+        rootPart.CFrame = spoofedCF
+        rootPart.AssemblyLinearVelocity = desyncCFramePositions[2] + Vector3.new(
+            math.cos(tick() * 8) * desyncForce,
+            math.cos(tick() * 8) * desyncForce,
+            0
+        )
+        RunService.RenderStepped:Wait()
+        rootPart.CFrame = desyncCFramePositions[1]
+        rootPart.AssemblyLinearVelocity = desyncCFramePositions[2]
+    end
+end)
+
+local originalCFrameIndex
+originalCFrameIndex = hookmetamethod(game, "__index", newcclosure(function(self, key)
+    if Immortality.Enabled and not checkcaller() then
+        if key == "CFrame" and player.Character and player.Character:FindFirstChild("HumanoidRootPart") then
+            if self == player.Character.HumanoidRootPart then
+                return desyncCFramePositions[1] or CFrame.new()
+            elseif self == player.Character:FindFirstChild("Head") then
+                return desyncCFramePositions[1] and desyncCFramePositions[1] + Vector3.new(0, player.Character.HumanoidRootPart.Size.Y / 2 + 0.5, 0) or CFrame.new()
+            end
+        end
+    end
+    return originalCFrameIndex(self, key)
+end))
+
+local Visuals = {
+    Enabled = false,
+    HitEffects = false,
+    Tracers = false,
+    Outline = false,
+    VisualParts = {},
+    TracerLines = {},
+    OutlineHandles = {},
+    Color = Color3.fromRGB(255, 255, 255)
+}
+
+local function FetchBalls()
+    local balls = {}
+    for _, b in ipairs(BallsFolder:GetChildren()) do
+        if b:GetAttribute("realBall") then
+            table.insert(balls, b)
+        end
+    end
+    return balls
+end
+
+local function UpdateVisualizer()
+    if not Visuals.Enabled then
+        for _, part in pairs(Visuals.VisualParts) do
+            pcall(function() part:Destroy() end)
+        end
+        Visuals.VisualParts = {}
+        return
+    end
+    for _, ball in ipairs(FetchBalls()) do
+        if ball and ball.Parent then
+            local speed = ball.AssemblyLinearVelocity.Magnitude
+            local size = math.clamp(speed / 5, 3.5, 500)
+            if not Visuals.VisualParts[ball] then
+                local sphere = Instance.new("Part")
+                sphere.Name = "VisualPart"
+                sphere.Anchored = true
+                sphere.CanCollide = false
+                sphere.CastShadow = false
+                sphere.Shape = Enum.PartType.Ball
+                sphere.Transparency = 0
+                sphere.Material = Enum.Material.ForceField
+                sphere.Color = Visuals.Color
+                sphere.Parent = ball
+                Visuals.VisualParts[ball] = sphere
+            end
+            Visuals.VisualParts[ball].Position = ball.Position
+            Visuals.VisualParts[ball].Size = Vector3.new(size, size, size)
+            Visuals.VisualParts[ball].Color = Visuals.Color
+        end
+    end
+    for ball, part in pairs(Visuals.VisualParts) do
+        if not ball or not ball.Parent then
+            pcall(function() part:Destroy() end)
+            Visuals.VisualParts[ball] = nil
+        end
+    end
+end
+
+local function UpdateTracers()
+    if not Visuals.Tracers then
+        for _, line in pairs(Visuals.TracerLines) do
+            pcall(function() line:Destroy() end)
+        end
+        Visuals.TracerLines = {}
+        return
+    end
+    local root = player.Character and player.Character:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    for _, ball in ipairs(FetchBalls()) do
+        if ball and ball.Parent then
+            if not Visuals.TracerLines[ball] then
+                local line = Instance.new("Part")
+                line.Name = "Tracer"
+                line.Anchored = true
+                line.CanCollide = false
+                line.CastShadow = false
+                line.Material = Enum.Material.Neon
+                line.Size = Vector3.new(0.2, 0.2, 0)
+                line.Color = Visuals.Color
+                line.Parent = workspace
+                Visuals.TracerLines[ball] = line
+            end
+            local start = ball.Position
+            local finish = root.Position
+            local dir = (finish - start).Unit
+            local dist = (finish - start).Magnitude
+            local line = Visuals.TracerLines[ball]
+            line.Size = Vector3.new(0.2, 0.2, dist)
+            line.CFrame = CFrame.new(start + dir * dist / 2, finish)
+            line.Color = Visuals.Color
+        end
+    end
+    for ball, line in pairs(Visuals.TracerLines) do
+        if not ball or not ball.Parent then
+            pcall(function() line:Destroy() end)
+            Visuals.TracerLines[ball] = nil
+        end
+    end
+end
+
+local function UpdateOutline()
+    if not Visuals.Outline then
+        for _, handle in pairs(Visuals.OutlineHandles) do
+            pcall(function() handle:Destroy() end)
+        end
+        Visuals.OutlineHandles = {}
+        return
+    end
+    for _, ball in ipairs(FetchBalls()) do
+        if ball and ball.Parent then
+            if not Visuals.OutlineHandles[ball] then
+                local hl = Instance.new("Highlight", ball)
+                hl.FillTransparency = 1
+                hl.OutlineTransparency = 0
+                hl.OutlineColor = Visuals.Color
+                Visuals.OutlineHandles[ball] = hl
+            else
+                Visuals.OutlineHandles[ball].OutlineColor = Visuals.Color
+            end
+        end
+    end
+    for ball, handle in pairs(Visuals.OutlineHandles) do
+        if not ball or not ball.Parent then
+            pcall(function() handle:Destroy() end)
+            Visuals.OutlineHandles[ball] = nil
+        end
+    end
+end
+
+local function SpawnHitEffect(ball)
+    if not Visuals.HitEffects then return end
+    local att = Instance.new("Attachment", ball)
+    local particles = Instance.new("ParticleEmitter", att)
+    particles.Enabled = false
+    particles.RotSpeed = NumberRange.new(250)
+    particles.VelocitySpread = -360
+    particles.Texture = "rbxassetid://8084911316"
+    particles.ZOffset = 1
+    particles.LightEmission = 1
+    particles.Rotation = NumberRange.new(-360, 360)
+    particles.Transparency = NumberSequence.new({
+        NumberSequenceKeypoint.new(0, 1, 0),
+        NumberSequenceKeypoint.new(0.25, 0, 0),
+        NumberSequenceKeypoint.new(0.75, 0, 0),
+        NumberSequenceKeypoint.new(1, 1, 0)
+    })
+    particles.Lifetime = NumberRange.new(1)
+    particles.Speed = NumberRange.new(math.random(1, 3))
+    particles.SpreadAngle = Vector2.new(-360, 360)
+    particles.Rate = 0
+    particles.Orientation = Enum.ParticleOrientation.VelocityPerpendicular
+    particles.Size = NumberSequence.new(NumberSequenceKeypoint.new(0, 10, 0), NumberSequenceKeypoint.new(1, 10, 0))
+    particles:Emit(1)
+    game:GetService("Debris"):AddItem(att, 1)
+end
+
+local ParrySuccessRemote = game:GetService("ReplicatedStorage"):FindFirstChild("Remotes") and game:GetService("ReplicatedStorage").Remotes:FindFirstChild("ParrySuccess")
+if ParrySuccessRemote then
+    ParrySuccessRemote.OnClientEvent:Connect(function()
+        if Visuals.HitEffects then
+            for _, ball in ipairs(FetchBalls()) do
+                SpawnHitEffect(ball)
+            end
+        end
+    end)
+end
+
+task.spawn(function()
+    while true do
+        UpdateVisualizer()
+        UpdateTracers()
+        UpdateOutline()
+        task.wait(0.03)
+    end
+end)
+
+local abilityEspEnabled = false
+local espLabels = {}
+local function CreateESP(plr)
+    local function add(character)
+        local head = character:WaitForChild("Head", 5)
+        if not head then return end
+        local bill = Instance.new("BillboardGui")
+        bill.Adornee = head
+        bill.Size = UDim2.new(0, 200, 0, 50)
+        bill.StudsOffset = Vector3.new(0, 3, 0)
+        bill.AlwaysOnTop = true
+        local label = Instance.new("TextLabel", bill)
+        label.Size = UDim2.new(1, 0, 1, 0)
+        label.BackgroundTransparency = 1
+        label.TextColor3 = Color3.new(1, 1, 1)
+        label.Font = Enum.Font.Code
+        label.TextSize = 12
+        label.TextXAlignment = Enum.TextXAlignment.Center
+        label.TextYAlignment = Enum.TextYAlignment.Center
+        bill.Parent = head
+        espLabels[plr] = label
+        local humanoid = character:FindFirstChild("Humanoid")
+        if humanoid then humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None end
+        local conn
+        conn = RunService.Heartbeat:Connect(function()
+            if not character or not character.Parent then
+                conn:Disconnect()
+                if bill then bill:Destroy() end
+                espLabels[plr] = nil
+                return
+            end
+            if abilityEspEnabled then
+                label.Visible = true
+                local ability = plr:GetAttribute("EquippedAbility")
+                label.Text = plr.DisplayName .. (ability and " [" .. ability .. "]" or "")
+            else
+                label.Visible = false
+            end
+        end)
+    end
+    if plr.Character then add(plr.Character) end
+    plr.CharacterAdded:Connect(add)
+end
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr ~= player then CreateESP(plr) end
+end
+Players.PlayerAdded:Connect(function(plr)
+    if plr ~= player then CreateESP(plr) end
+end)
+
+local ballStatsEnabled = false
+local statsGui = nil
+local statsLabel = nil
+local function ToggleBallStats(on)
+    if on then
+        if statsGui then statsGui:Destroy() end
+        statsGui = Instance.new("ScreenGui")
+        statsGui.Name = "BallStats"
+        statsGui.ResetOnSpawn = false
+        statsGui.Parent = player:WaitForChild("PlayerGui")
+        statsLabel = Instance.new("TextLabel", statsGui)
+        statsLabel.Size = UDim2.new(0, 200, 0, 30)
+        statsLabel.Position = UDim2.new(1, -210, 0, 10)
+        statsLabel.BackgroundTransparency = 1
+        statsLabel.TextColor3 = Color3.new(1, 1, 1)
+        statsLabel.Font = Enum.Font.Code
+        statsLabel.TextSize = 14
+        statsLabel.Text = "waiting..."
+        local function update()
+            local balls = FetchBalls()
+            if #balls == 0 then
+                statsLabel.Text = "waiting..."
+                return
+            end
+            local maxSpeed = 0
+            for _, b in ipairs(balls) do
+                local zoom = b:FindFirstChild("zoomies")
+                if zoom then
+                    local spd = zoom.VectorVelocity.Magnitude
+                    if spd > maxSpeed then maxSpeed = spd end
+                end
+            end
+            local txt = string.format("ball velocity: %.0f", maxSpeed)
+            if maxSpeed >= 2200 then txt = txt .. " (LIMIT!)" end
+            statsLabel.Text = txt
+            statsLabel.TextColor3 = maxSpeed >= 2200 and Color3.new(1, 0, 0) or Color3.new(1, 1, 1)
+        end
+        local conn = RunService.Heartbeat:Connect(update)
+        statsGui.Destroying:Connect(function()
+            conn:Disconnect()
+        end)
+    else
+        if statsGui then statsGui:Destroy(); statsGui = nil end
+    end
+end
+
+local swordChangerEnabled = false
+local swordName = "Default"
+local Shared = game:GetService("ReplicatedStorage"):WaitForChild("Shared", 9e9):WaitForChild("ReplicatedInstances", 9e9):WaitForChild("Swords", 9e9)
+local SwordsModule = require(Shared)
+
+local swordUpvalueTable = nil
+for _, con in getconnections(game:GetService("ReplicatedStorage").Remotes.FireSwordInfo.OnClientEvent) do
+    if con.Function and islclosure(con.Function) then
+        local ups = getupvalues(con.Function)
+        if #ups == 1 and type(ups[1]) == "table" then
+            swordUpvalueTable = ups[1]
+            break
+        end
+    end
+end
+
+local function SetSword()
+    if not swordChangerEnabled then return end
+    pcall(function()
+        setupvalue(rawget(SwordsModule, "EquipSwordTo"), 3, false)
+        SwordsModule:EquipSwordTo(player.Character, swordName)
+        if swordUpvalueTable then
+            swordUpvalueTable:SetSword(swordName)
+        end
+    end)
+end
+
+local function UpdateSwordChanger()
+    if swordChangerEnabled then
+        SetSword()
+        task.spawn(function()
+            while swordChangerEnabled do
+                task.wait(2)
+                if player.Character and player.Character:GetAttribute("CurrentlyEquippedSword") ~= swordName then
+                    SetSword()
+                end
+            end
+        end)
+    end
+end
+
+local avatarChangerEnabled = false
+local avatarName = ""
+local function GetUserId(name) return Players:GetUserIdFromNameAsync(name) end
+local function GetDescription(userId) return Players:GetHumanoidDescriptionFromUserId(userId) end
+local function ApplyAvatar(character, name)
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    task.wait(0.3)
+    local userId = GetUserId(name)
+    local desc = GetDescription(userId)
+    if not desc then return end
+    pcall(function() humanoid:ApplyDescriptionClientServer(desc) end)
+    task.wait(0.2)
+    local bodyColors = character:FindFirstChildOfClass("BodyColors")
+    if bodyColors then
+        pcall(function() bodyColors.HeadColor3 = desc.HeadColor end)
+        pcall(function() bodyColors.TorsoColor3 = desc.TorsoColor end)
+        pcall(function() bodyColors.LeftArmColor3 = desc.LeftArmColor end)
+        pcall(function() bodyColors.RightArmColor3 = desc.RightArmColor end)
+        pcall(function() bodyColors.LeftLegColor3 = desc.LeftLegColor end)
+        pcall(function() bodyColors.RightLegColor3 = desc.RightLegColor end)
+    end
+end
+local avatarConnection = nil
+local function ToggleAvatarChanger(on)
+    if on and avatarName ~= "" then
+        player:ClearCharacterAppearance()
+        ApplyAvatar(player.Character, avatarName)
+        avatarConnection = player.CharacterAdded:Connect(function(char)
+            task.wait(0.65)
+            if avatarChangerEnabled and avatarName ~= "" then
+                player:ClearCharacterAppearance()
+                task.wait(0.1)
+                ApplyAvatar(char, avatarName)
+            end
+        end)
+    else
+        if avatarConnection then
+            avatarConnection:Disconnect()
+            avatarConnection = nil
+        end
+        if player.Character then
+            player:ClearCharacterAppearance()
+            ApplyAvatar(player.Character, player.Name)
+        end
+    end
+end
+
+local Music = { Active = false, Volume = 0.5, CurrentId = "9126639173", Sound = nil }
+local function PlayMusic()
+    if Music.Sound then pcall(function() Music.Sound:Stop() end) end
+    if Music.Active then
+        local sound = Instance.new("Sound")
+        sound.SoundId = "rbxassetid://" .. Music.CurrentId
+        sound.Volume = Music.Volume
+        sound.Looped = true
+        sound.Parent = player:WaitForChild("PlayerGui")
+        pcall(function() sound:Play() end)
+        Music.Sound = sound
+    end
+end
+
+local function SetFOV(val) workspace.CurrentCamera.FieldOfView = val end
+
+local manualSpamButton = nil
+local manualSpamButtonGui = nil
+
+local function UpdateManualSpamButtonUI()
+    if not manualSpamButton then return end
+    if manualSpamRunning then
+        manualSpamButton.Text = "ON"
+    else
+        manualSpamButton.Text = "OFF"
+    end
+end
+
+local function CreateManualSpamButton()
+    if manualSpamButtonGui then manualSpamButtonGui:Destroy() end
+    manualSpamButtonGui = Instance.new("ScreenGui")
+    manualSpamButtonGui.Name = "ManualSpamButton"
+    manualSpamButtonGui.ResetOnSpawn = false
+    manualSpamButtonGui.Parent = player:WaitForChild("PlayerGui")
+    
+    manualSpamButton = Instance.new("TextButton")
+    manualSpamButton.Size = UDim2.new(0, 160, 0, 90)
+    manualSpamButton.Position = UDim2.new(0.5, -80, 0.8, -45)
+    manualSpamButton.BackgroundColor3 = Color3.new(0, 0, 0)
+    manualSpamButton.BackgroundTransparency = 0.2
+    manualSpamButton.Text = "OFF"
+    manualSpamButton.TextColor3 = Color3.new(1, 1, 1)
+    manualSpamButton.TextSize = 24
+    manualSpamButton.Font = Enum.Font.GothamBold
+    manualSpamButton.BorderSizePixel = 0
+    manualSpamButton.Parent = manualSpamButtonGui
+    
+    local corner = Instance.new("UICorner")
+    corner.CornerRadius = UDim.new(0, 12)
+    corner.Parent = manualSpamButton
+    
+    local dragging = false
+    local dragStartPos = nil
+    local buttonStartPos = nil
+    
+    local function startDrag(input)
+        dragging = true
+        dragStartPos = input.Position
+        buttonStartPos = manualSpamButton.Position
+    end
+    
+    local function updateDrag(input)
+        if not dragging then return end
+        local delta = input.Position - dragStartPos
+        manualSpamButton.Position = UDim2.new(
+            buttonStartPos.X.Scale,
+            buttonStartPos.X.Offset + delta.X,
+            buttonStartPos.Y.Scale,
+            buttonStartPos.Y.Offset + delta.Y
+        )
+    end
+    
+    local function endDrag()
+        dragging = false
+    end
+    
+    manualSpamButton.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            startDrag(input)
+        end
+    end)
+    
+    manualSpamButton.InputChanged:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch then
+            updateDrag(input)
+        end
+    end)
+    
+    manualSpamButton.InputEnded:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+            endDrag()
+        end
+    end)
+    
+    manualSpamButton.MouseButton1Click:Connect(function()
+        if manualSpamRunning then
+            StopManualSpam()
+        else
+            StartManualSpam()
+        end
+        UpdateManualSpamButtonUI()
+        if Toggles and Toggles.ManualSpam then
+            Toggles.ManualSpam:SetValue(manualSpamRunning)
+        end
+    end)
+end
+
+local function DestroyManualSpamButton()
+    if manualSpamButtonGui then
+        manualSpamButtonGui:Destroy()
+        manualSpamButtonGui = nil
+        manualSpamButton = nil
+    end
+end
+
+local Toggles = nil
+
+local function CreateUI()
+    local existing = player:WaitForChild("PlayerGui"):FindFirstChild("ApexUI")
+    if existing then existing:Destroy() end
+
+    local repo = "https://raw.githubusercontent.com/deividcomsono/Obsidian/main/"
+    local Library = loadstring(game:HttpGet(repo .. "Library.lua"))()
+    if not Library then return end
+
+    if Library.Scheme then
+        Library.Scheme.Accent = Color3.fromRGB(0, 150, 255)
+        Library.Scheme.Accent2 = Color3.fromRGB(0, 200, 255)
+    end
+
+    local Options = Library.Options
+    Toggles = Library.Toggles
+
+    local Window = Library:CreateWindow({
+        Title = "Apex Free",
+        Footer = "by hybrid_function",
+        Icon = 129639475405891,
+        NotifySide = "Right",
+        ShowCustomCursor = true,
+    })
+
+    local CombatTab = Window:AddTab("Combat", "sword")
+    local VisualsTab = Window:AddTab("Visuals", "eye")
+    local CharacterTab = Window:AddTab("Character", "user")
+    local ExtrasTab = Window:AddTab("Extras", "settings")
+
+    local CombatGroup = CombatTab:AddLeftGroupbox("Combat", "boxes")
+    CombatGroup:AddToggle("AutoParry", {
+        Text = "Auto Parry",
+        Default = autoParryEnabled,
+        Callback = function(Value) ToggleAutoParry(Value) end,
+    })
+    CombatGroup:AddToggle("AutoSpam", {
+        Text = "Auto Spam",
+        Default = autoSpamEnabled,
+        Callback = function(Value)
+            autoSpamEnabled = Value
+            if not Value then
+                StopAutoSpam()
+                aggressiveMode = false
+                SetAutoParryConnection()
+            end
+        end,
+    })
+    local manualSpamToggle = CombatGroup:AddToggle("ManualSpam", {
+        Text = "Manual Spam",
+        Default = manualSpamRunning,
+        Callback = function(Value)
+            if Value then
+                StartManualSpam()
+                CreateManualSpamButton()
+            else
+                StopManualSpam()
+                DestroyManualSpamButton()
+            end
+            UpdateManualSpamButtonUI()
+        end,
+    })
+    CombatGroup:AddDropdown("CurveMethod", {
+        Text = "Curve Method",
+        Values = {"camera", "upwards", "backwards", "random"},
+        Default = curveMethod,
+        Callback = function(Value) curveMethod = Value end,
+    })
+
+    local ImmortalityGroup = CombatTab:AddRightGroupbox("Semi-Immortal", "shield")
+    ImmortalityGroup:AddToggle("ImmortalityEnabled", {
+        Text = "Enabled",
+        Default = Immortality.Enabled,
+        Callback = function(Value) Immortality.Enabled = Value end,
+    })
+    ImmortalityGroup:AddSlider("ImmortalityRadius", {
+        Text = "Radius",
+        Default = Immortality.DesyncRadius,
+        Min = 0,
+        Max = 100,
+        Rounding = 1,
+        Callback = function(Value) Immortality.DesyncRadius = Value end,
+    })
+    ImmortalityGroup:AddSlider("ImmortalityHeight", {
+        Text = "Height",
+        Default = Immortality.DesyncHeight,
+        Min = 0,
+        Max = 100,
+        Rounding = 1,
+        Callback = function(Value) Immortality.DesyncHeight = Value end,
+    })
+
+    local VisualsGroup = VisualsTab:AddLeftGroupbox("Visuals", "eye")
+    VisualsGroup:AddToggle("BallVisualizer", {
+        Text = "Ball Visualizer",
+        Default = Visuals.Enabled,
+        Callback = function(Value) Visuals.Enabled = Value end,
+    })
+    VisualsGroup:AddToggle("HitEffects", {
+        Text = "Hit Effects",
+        Default = Visuals.HitEffects,
+        Callback = function(Value) Visuals.HitEffects = Value end,
+    })
+    VisualsGroup:AddToggle("BallTracers", {
+        Text = "Ball Tracers",
+        Default = Visuals.Tracers,
+        Callback = function(Value) Visuals.Tracers = Value end,
+    })
+    VisualsGroup:AddToggle("Outline", {
+        Text = "Outline",
+        Default = Visuals.Outline,
+        Callback = function(Value) Visuals.Outline = Value end,
+    })
+    VisualsGroup:AddDropdown("VisualColor", {
+        Text = "Visual Color",
+        Values = {"White", "Red", "Green", "Blue", "Yellow", "Pink", "Cyan"},
+        Default = "White",
+        Callback = function(Value)
+            local colors = {
+                White = Color3.new(1,1,1),
+                Red = Color3.new(1,0,0),
+                Green = Color3.new(0,1,0),
+                Blue = Color3.new(0,0,1),
+                Yellow = Color3.new(1,1,0),
+                Pink = Color3.new(1,0,1),
+                Cyan = Color3.new(0,1,1),
+            }
+            Visuals.Color = colors[Value]
+        end,
+    })
+    VisualsGroup:AddToggle("AbilityESP", {
+        Text = "Ability ESP",
+        Default = abilityEspEnabled,
+        Callback = function(Value) abilityEspEnabled = Value end,
+    })
+    VisualsGroup:AddToggle("BallStats", {
+        Text = "Ball Stats",
+        Default = ballStatsEnabled,
+        Callback = function(Value) ToggleBallStats(Value) end,
+    })
+
+    local CharacterGroup = CharacterTab:AddLeftGroupbox("Character", "user")
+    CharacterGroup:AddToggle("SwordChanger", {
+        Text = "Sword Changer",
+        Default = swordChangerEnabled,
+        Callback = function(Value)
+            swordChangerEnabled = Value
+            if Value then UpdateSwordChanger() end
+        end,
+    })
+    CharacterGroup:AddInput("SwordName", {
+        Text = "Sword Name",
+        Default = swordName,
+        Callback = function(Text)
+            swordName = Text
+            if swordChangerEnabled then SetSword() end
+        end,
+    })
+    CharacterGroup:AddToggle("AvatarChanger", {
+        Text = "Avatar Changer",
+        Default = avatarChangerEnabled,
+        Callback = function(Value)
+            avatarChangerEnabled = Value
+            ToggleAvatarChanger(Value)
+        end,
+    })
+    CharacterGroup:AddInput("AvatarName", {
+        Text = "Avatar Name",
+        Default = avatarName,
+        Callback = function(Text)
+            avatarName = Text
+            if avatarChangerEnabled then ToggleAvatarChanger(true) end
+        end,
+    })
+
+    local ExtrasGroup = ExtrasTab:AddLeftGroupbox("Extras", "settings")
+    ExtrasGroup:AddSlider("FOV", {
+        Text = "FOV",
+        Default = workspace.CurrentCamera.FieldOfView,
+        Min = 60,
+        Max = 120,
+        Rounding = 0,
+        Callback = function(Value) SetFOV(Value) end,
+    })
+    ExtrasGroup:AddToggle("MusicEnabled", {
+        Text = "Music",
+        Default = Music.Active,
+        Callback = function(Value)
+            Music.Active = Value
+            PlayMusic()
+        end,
+    })
+    ExtrasGroup:AddSlider("MusicVolume", {
+        Text = "Volume",
+        Default = Music.Volume,
+        Min = 0,
+        Max = 1,
+        Rounding = 2,
+        Callback = function(Value)
+            Music.Volume = Value
+            if Music.Sound then Music.Sound.Volume = Value end
+        end,
+    })
+    ExtrasGroup:AddInput("SongID", {
+        Text = "Song ID",
+        Default = Music.CurrentId,
+        Callback = function(Text)
+            Music.CurrentId = Text:match("%d+") or "9126639173"
+            if Music.Active then PlayMusic() end
+        end,
+    })
+end
+
+CreateUI()
