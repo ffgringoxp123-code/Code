@@ -792,44 +792,163 @@ end
 
 System.manual_spam = {}
 
-function System.manual_spam.loop(delta)
-    if not System.__properties.__manual_spam_enabled then return end
-    if not LocalPlayer.Character or LocalPlayer.Character.Parent ~= Alive then return end
+local lastplayedd = 0
+local bypasscd = false
+local spam_started = false
+local first_run_executed = false
+local clash_count = 0
+local last_clash_success_time = 0 
+local AnimationCache = {}
+local SwordAPI = game:GetService("ReplicatedStorage"):WaitForChild("Shared"):WaitForChild("SwordAPI")
+
+local function IsEligibleToSpam()
+    local player = game.Players.LocalPlayer
+    local char = player.Character
+    if not char or not char:FindFirstChildOfClass("Humanoid") or char:FindFirstChildOfClass("Humanoid").Health <= 0 then
+        return false
+    end
+    local inMatch = player:GetAttribute("InMatch")
+    local isPlaying = player:GetAttribute("IsPlaying")
+    if inMatch == false or isPlaying == false then
+        return false
+    end
+    return true
+end
+
+local function GetParryAnimation()
+    local char = game.Players.LocalPlayer.Character
+    if not char then return nil end
+    local currentSword = (getgenv().skinChangerEnabled and getgenv().swordAnimations) or char:GetAttribute("CurrentlyEquippedSword")
     
-    System.__properties.__spam_accumulator = System.__properties.__spam_accumulator + delta
-    local interval = 1 / System.__properties.__spam_rate
+    if not currentSword then 
+        return SwordAPI.Collection.Default:FindFirstChild("GrabParry") 
+    end
+    if AnimationCache[currentSword] then return AnimationCache[currentSword] end
     
-    if System.__properties.__spam_accumulator >= interval then
-        System.__properties.__spam_accumulator = 0
-        
-        if getgenv().ManualSpamMode == "Keypress" then
-            if PF then PF() end
-        else
-            System.parry.execute()
-            if getgenv().ManualSpamAnimationFix and PF then
-                PF()
+    local success, swordData = pcall(function() 
+        return game:GetService("ReplicatedStorage").Shared.ReplicatedInstances.Swords.GetSword:Invoke(currentSword) 
+    end)
+    
+    if not success or type(swordData) ~= "table" then
+        AnimationCache[currentSword] = SwordAPI.Collection.Default:FindFirstChild("GrabParry")
+        return AnimationCache[currentSword]
+    end
+    
+    for _, obj in pairs(SwordAPI.Collection:GetChildren()) do
+        if obj.Name == swordData.AnimationType then
+            local anim = obj:FindFirstChild("GrabParry") or obj:FindFirstChild("Grab")
+            if anim then 
+                AnimationCache[currentSword] = anim 
+                return anim 
             end
         end
     end
+    return SwordAPI.Collection.Default:FindFirstChild("GrabParry")
 end
 
+local function PlayParry_Animation()
+    local char = game.Players.LocalPlayer.Character
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if not animator then return end
+    
+    local animation = GetParryAnimation()
+    if not animation then return end
+    
+    for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+        if track.Name == "GrabParry" or track.Name == "Grab" or track.Name == "SuccessParry" or track.Name == "Success" then
+            if track.Name:find("Grab") then track.TimePosition = 0 end
+            track:Stop(0.1)
+        end
+    end
+    
+    local track = animator:LoadAnimation(animation)
+    track.Priority = Enum.AnimationPriority.Action4
+    track:Play(0, 1, 1)
+end
+
+game:GetService("ReplicatedStorage").Remotes.ParrySuccess.OnClientEvent:Connect(function()
+    local now = os.clock()
+    
+    if not spam_started then
+        if (now - last_clash_success_time) <= 0.6 then
+            clash_count = clash_count + 1
+        else
+            clash_count = 1 
+        end
+        
+        if clash_count >= 6 then
+            spam_started = true
+        end
+    end
+    
+    last_clash_success_time = now
+    bypasscd = true
+    
+    local char = game.Players.LocalPlayer.Character
+    local humanoid = char and char:FindFirstChildOfClass("Humanoid")
+    local animator = humanoid and humanoid:FindFirstChildOfClass("Animator")
+    if animator then
+        for _, track in pairs(animator:GetPlayingAnimationTracks()) do
+            if track.Name == "GrabParry" or track.Name == "Grab" then track:Stop(0.05) end
+        end
+    end
+end)
+
 function System.manual_spam.start()
-    if System.__properties.__connections.__manual_spam then
-        System.__properties.__connections.__manual_spam:Disconnect()
+    if System.__properties.__connections.__manual_spam_connection then
+        System.__properties.__connections.__manual_spam_connection:Disconnect()
     end
     
     System.__properties.__manual_spam_enabled = true
-    System.__properties.__connections.__manual_spam = RunService.Heartbeat:Connect(System.manual_spam.loop)
+    spam_started = false 
+    first_run_executed = false
+    clash_count = 0
+    last_clash_success_time = 0
+    lastplayedd = os.clock()
+    
+    System.__properties.__connections.__manual_spam_connection = game:GetService("RunService").RenderStepped:Connect(function()
+        if not System.__properties.__manual_spam_enabled or not IsEligibleToSpam() then 
+            return 
+        end
+        
+        local now = os.clock()
+
+        if not first_run_executed then
+            first_run_executed = true
+            lastplayedd = now
+            pcall(PlayParry_Animation)
+        end
+
+        if getgenv().ManualSpamMode == "Keypress" then
+            System.parry.keypress()
+        else
+            System.parry.execute()
+        end
+
+        local cooldown = 1.3
+        if spam_started then
+            cooldown = 0.08
+        end
+
+        if (now - lastplayedd) >= cooldown or bypasscd then
+            lastplayedd = now
+            bypasscd = false
+            pcall(PlayParry_Animation)
+        end
+    end)
 end
 
 function System.manual_spam.stop()
     System.__properties.__manual_spam_enabled = false
-    if System.__properties.__connections.__manual_spam then
-        System.__properties.__connections.__manual_spam:Disconnect()
-        System.__properties.__connections.__manual_spam = nil
+    spam_started = false 
+    first_run_executed = false
+    clash_count = 0
+    if System.__properties.__connections.__manual_spam_connection then
+        System.__properties.__connections.__manual_spam_connection:Disconnect()
+        System.__properties.__connections.__manual_spam_connection = nil
     end
 end
-
 System.auto_spam = {}
 
 local autoSpamThread = nil
