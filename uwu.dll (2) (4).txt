@@ -5461,7 +5461,7 @@ local StarterGui = game:GetService('StarterGui')
 
 StarterGui:SetCore('SendNotification', {
     Title = 'SKR',
-    Text = 'Sakura Premium',
+    Text = 'This is an older, revised version',
     Icon = 'rbxassetid://138471605807717',
     Duration = 10,
 })
