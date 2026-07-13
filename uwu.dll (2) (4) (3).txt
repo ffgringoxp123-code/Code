@@ -1193,202 +1193,156 @@ function System.autoparry.start()
         System.__properties.__connections.__autoparry:Disconnect()
     end
     
-    -- Xác định primary part cho R15
-    local function getPrimaryPart()
-        local char = LocalPlayer.Character
-        if not char then return nil end
-        -- R15 ưu tiên HumanoidRootPart
-        local hrp = char:FindFirstChild("HumanoidRootPart")
-        if hrp then return hrp end
-        -- Fallback về PrimaryPart
-        local pp = char.PrimaryPart
-        if pp then return pp end
-        -- Fallback về UpperTorso
-        return char:FindFirstChild("UpperTorso") or char:FindFirstChild("Torso")
-    end
-    
     System.__properties.__connections.__autoparry = RunService.PreSimulation:Connect(function()
-        -- Kiểm tra trạng thái
-        if not System.__properties.__autoparry_enabled then return end
-        local char = LocalPlayer.Character
-        if not char then return end
-        local primaryPart = getPrimaryPart()
-        if not primaryPart then return end
+        if not System.__properties.__autoparry_enabled or not LocalPlayer.Character or 
+           not LocalPlayer.Character.PrimaryPart then
+            return
+        end
         
         local balls = System.ball.get_all()
         local one_ball = System.ball.get()
         
-        -- Xử lý training balls
         local training_ball = nil
-        if workspace:FindFirstChild("TrainingBalls") then
+        if workspace:FindFirstChild('TrainingBalls') then
             for _, Instance in pairs(workspace.TrainingBalls:GetChildren()) do
-                if Instance:GetAttribute("realBall") then
+                if Instance:GetAttribute('realBall') then
                     training_ball = Instance
                     break
                 end
             end
         end
-        
-        -- Lấy ping một lần
-        local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
-        local ping_threshold = math.clamp(ping / 10, 5, 17)
-        
-        -- Xử lý từng ball
+
         for _, ball in pairs(balls) do
+            if System.__triggerbot.__enabled then return end
             if getgenv().BallVelocityAbove800 then return end
             if not ball then continue end
             
             local zoomies = ball:FindFirstChild('zoomies')
             if not zoomies then continue end
             
-            -- Kiểm tra parried state
-            if System.__properties.__parried then 
-                -- Reset sau 1 giây
-                task.delay(1, function()
-                    System.__properties.__parried = false
-                end)
-                continue 
-            end
+            ball:GetAttributeChangedSignal('target'):Once(function()
+                System.__properties.__parried = false
+            end)
+            
+            if System.__properties.__parried then continue end
             
             local ball_target = ball:GetAttribute('target')
-            if not ball_target then continue end
+            local velocity = zoomies.VectorVelocity
+            local distance = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Magnitude
             
-            -- Kiểm tra tornado
+            local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
+            local ping_threshold = math.clamp(ping / 10, 5, 17)
+            local speed = velocity.Magnitude
+            
+            local capped_speed_diff = math.min(math.max(speed - 9.5, 0), 650)
+            local speed_divisor = (2.4 + capped_speed_diff * 0.002) * System.__properties.__divisor_multiplier
+            local parry_accuracy = ping_threshold + math.max(speed / speed_divisor, 9.5)
+            
+            local curved = System.detection.is_curved()
+            
             if ball:FindFirstChild('AeroDynamicSlashVFX') then
                 ball.AeroDynamicSlashVFX:Destroy()
                 System.__properties.__tornado_time = tick()
             end
             
             if Runtime:FindFirstChild('Tornado') then
-                local tornadoTime = Runtime.Tornado:GetAttribute('TornadoTime') or 1
-                if (tick() - (System.__properties.__tornado_time or 0)) < tornadoTime + 0.314159 then
+                if (tick() - System.__properties.__tornado_time) < 
+                   (Runtime.Tornado:GetAttribute('TornadoTime') or 1) + 0.314159 then
                     continue
                 end
             end
             
-            -- Skip nếu là curved ball và đã có target
-            if one_ball and one_ball:GetAttribute('target') == LocalPlayer.Name then
-                local curved = System.detection.is_curved()
-                if curved then continue end
+            if one_ball and one_ball:GetAttribute('target') == LocalPlayer.Name and curved then
+                continue
             end
             
-            -- Skip combo counter và singularity cape
             if ball:FindFirstChild('ComboCounter') then continue end
-            if primaryPart:FindFirstChild('SingularityCape') then continue end
             
-            -- Tính toán parry accuracy
-            local velocity = zoomies.VectorVelocity
-            local distance = (primaryPart.Position - ball.Position).Magnitude
-            local speed = velocity.Magnitude
-            local capped_speed_diff = math.min(math.max(speed - 9.5, 0), 650)
-            local speed_divisor = (2.4 + capped_speed_diff * 0.002) * (System.__properties.__divisor_multiplier or 1)
-            local parry_accuracy = ping_threshold + math.max(speed / speed_divisor, 9.5)
+            if LocalPlayer.Character.PrimaryPart:FindFirstChild('SingularityCape') then continue end
             
-            -- Parry khi ball tới
+            if System.__config.__detections.__infinity and System.__properties.__infinity_active then continue end
+            if System.__config.__detections.__deathslash and System.__properties.__deathslash_active then continue end
+            if System.__config.__detections.__timehole and System.__properties.__timehole_active then continue end
+            if System.__config.__detections.__slashesoffury and System.__properties.__slashesoffury_active then continue end
+            
             if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
-                -- Kiểm tra cooldown protection
                 if getgenv().CooldownProtection then
-                    local ParryCD = LocalPlayer.PlayerGui:FindFirstChild("Hotbar")
-                    if ParryCD then
-                        local blockUI = ParryCD:FindFirstChild("Block")
-                        if blockUI then
-                            local uigradient = blockUI:FindFirstChild("UIGradient")
-                            if uigradient and uigradient.Offset.Y < 0.4 then
-                                -- Gửi ability press để reset cooldown
-                                ReplicatedStorage:FindFirstChild("Remotes"):FindFirstChild("AbilityButtonPress"):Fire()
-                                continue
-                            end
-                        end
+                    local ParryCD = LocalPlayer.PlayerGui.Hotbar.Block.UIGradient
+                    if ParryCD.Offset.Y < 0.4 then
+                        ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
+                        continue
                     end
                 end
                 
-                -- Auto Ability handling
                 if getgenv().AutoAbility then
-                    local abilityCD = nil
-                    local hotbar = LocalPlayer.PlayerGui:FindFirstChild("Hotbar")
-                    if hotbar then
-                        local abilityUI = hotbar:FindFirstChild("Ability")
-                        if abilityUI then
-                            abilityCD = abilityUI:FindFirstChild("UIGradient")
-                        end
-                    end
-                    
-                    if abilityCD and abilityCD.Offset.Y == 0.5 then
-                        local abilities = char:FindFirstChild("Abilities")
-                        if abilities then
-                            local hasAbility = false
-                            local abilityNames = {
-                                "Raging Deflection", "Rapture", "Calming Deflection",
-                                "Aerodynamic Slash", "Fracture", "Death Slash"
-                            }
-                            for _, name in ipairs(abilityNames) do
-                                local ability = abilities:FindFirstChild(name)
-                                if ability and ability.Enabled then
-                                    hasAbility = true
-                                    break
-                                end
-                            end
-                            
-                            if hasAbility then
-                                System.__properties.__parried = true
-                                ReplicatedStorage:FindFirstChild("Remotes"):FindFirstChild("AbilityButtonPress"):Fire()
-                                
-                                -- Delay cho Death Slash
-                                task.spawn(function()
-                                    task.wait(2.432)
-                                    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
-                                    if remotes then
-                                        local ds = remotes:FindFirstChild("DeathSlashShootActivation")
-                                        if ds then
-                                            ds:FireServer(true)
-                                        end
-                                    end
-                                    System.__properties.__parried = false
-                                end)
-                                continue
-                            end
+                    local AbilityCD = LocalPlayer.PlayerGui.Hotbar.Ability.UIGradient
+                    if AbilityCD.Offset.Y == 0.5 then
+                        if LocalPlayer.Character.Abilities:FindFirstChild('Raging Deflection') and LocalPlayer.Character.Abilities['Raging Deflection'].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild('Rapture') and LocalPlayer.Character.Abilities['Rapture'].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild('Calming Deflection') and LocalPlayer.Character.Abilities['Calming Deflection'].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild('Aerodynamic Slash') and LocalPlayer.Character.Abilities['Aerodynamic Slash'].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild('Fracture') and LocalPlayer.Character.Abilities['Fracture'].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild('Death Slash') and LocalPlayer.Character.Abilities['Death Slash'].Enabled then
+                            System.__properties.__parried = true
+                            ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
+                            task.wait(2.432)
+                            ReplicatedStorage:WaitForChild('Remotes'):WaitForChild('DeathSlashShootActivation'):FireServer(true)
+                            continue
                         end
                     end
                 end
-                
-                -- Thực hiện parry
-                if getgenv().AutoParryMode == "Keypress" then
+            end
+            
+            if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
+                if getgenv().AutoParryMode == 'Keypress' then
                     System.parry.keypress()
                 else
                     System.parry.execute_action()
                 end
                 System.__properties.__parried = true
-                
-                -- Reset parried state sau 1 giây
-                task.delay(1, function()
-                    System.__properties.__parried = false
-                end)
             end
+            
+            local last_parrys = tick()
+            repeat
+                RunService.Stepped:Wait()
+            until (tick() - last_parrys) >= 1 or not System.__properties.__parried
+            System.__properties.__parried = false
         end
-        
-        -- Xử lý training ball
+
         if training_ball then
             local zoomies = training_ball:FindFirstChild('zoomies')
-            if zoomies and not System.__properties.__training_parried then
-                local ball_target = training_ball:GetAttribute('target')
-                local velocity = zoomies.VectorVelocity
-                local distance = LocalPlayer:DistanceFromCharacter(training_ball.Position)
-                local speed = velocity.Magnitude
-                local capped_speed_diff = math.min(math.max(speed - 9.5, 0), 650)
-                local speed_divisor = (2.4 + capped_speed_diff * 0.002) * (System.__properties.__divisor_multiplier or 1)
-                local parry_accuracy = ping_threshold + math.max(speed / speed_divisor, 9.5)
+            if zoomies then
+                training_ball:GetAttributeChangedSignal('target'):Once(function()
+                    System.__properties.__training_parried = false
+                end)
                 
-                if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
-                    if getgenv().AutoParryMode == "Keypress" then
-                        System.parry.keypress()
-                    else
-                        System.parry.execute_action()
-                    end
-                    System.__properties.__training_parried = true
+                if not System.__properties.__training_parried then
+                    local ball_target = training_ball:GetAttribute('target')
+                    local velocity = zoomies.VectorVelocity
+                    local distance = LocalPlayer:DistanceFromCharacter(training_ball.Position)
+                    local speed = velocity.Magnitude
                     
-                    task.delay(1, function()
+                    local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
+                    local ping_threshold = math.clamp(ping / 10, 5, 17)
+                    
+                    local capped_speed_diff = math.min(math.max(speed - 9.5, 0), 650)
+                    local speed_divisor = (2.4 + capped_speed_diff * 0.002) * System.__properties.__divisor_multiplier
+                    local parry_accuracy = ping_threshold + math.max(speed / speed_divisor, 9.5)
+                    
+                    if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
+                        if getgenv().AutoParryMode == 'Keypress' then
+                            System.parry.keypress()
+                        else
+                            System.parry.execute_action()
+                        end
+                        System.__properties.__training_parried = true
+                        
+                        local last_parrys = tick()
+                        repeat
+                            RunService.Stepped:Wait()
+                        until (tick() - last_parrys) >= 1 or not System.__properties.__training_parried
                         System.__properties.__training_parried = false
-                    end)
+                    end
                 end
             end
         end
@@ -1401,7 +1355,6 @@ function System.autoparry.stop()
         System.__properties.__connections.__autoparry = nil
     end
 end
-
 
 local function create_mobile_button(name, position_y, color)
     local gui = Instance.new('ScreenGui')
