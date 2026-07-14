@@ -1186,157 +1186,132 @@ function System.auto_spam.start()
     end)
 end
 
+local ParryRemote = game:GetService("ReplicatedStorage").Packages._Index:FindFirstChild("sleitnick_net@0.1.0").net:FindFirstChild("RE/k`knfcjbcomee1k::i`;l9o4qimiqhk5")
+local DeathSlashRemote = ReplicatedStorage:WaitForChild("Remotes"):WaitForChild("DeathSlashShootActivation")
+
 System.autoparry = {}
 
 function System.autoparry.start()
     if System.__properties.__connections.__autoparry then
         System.__properties.__connections.__autoparry:Disconnect()
     end
-    
     System.__properties.__connections.__autoparry = RunService.PreSimulation:Connect(function()
         if not System.__properties.__autoparry_enabled or not LocalPlayer.Character or 
            not LocalPlayer.Character.PrimaryPart then
             return
         end
-        
         local balls = System.ball.get_all()
         local one_ball = System.ball.get()
-        
         local training_ball = nil
-        if workspace:FindFirstChild('TrainingBalls') then
+        if workspace:FindFirstChild("TrainingBalls") then
             for _, Instance in pairs(workspace.TrainingBalls:GetChildren()) do
-                if Instance:GetAttribute('realBall') then
+                if Instance:GetAttribute("realBall") then
                     training_ball = Instance
                     break
                 end
             end
         end
-
         for _, ball in pairs(balls) do
-            if System.__triggerbot.__enabled then return end
             if getgenv().BallVelocityAbove800 then return end
             if not ball then continue end
-            
             local zoomies = ball:FindFirstChild('zoomies')
             if not zoomies then continue end
-            
             ball:GetAttributeChangedSignal('target'):Once(function()
                 System.__properties.__parried = false
             end)
-            
             if System.__properties.__parried then continue end
-            
             local ball_target = ball:GetAttribute('target')
             local velocity = zoomies.VectorVelocity
             local distance = (LocalPlayer.Character.PrimaryPart.Position - ball.Position).Magnitude
-            
             local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
             local ping_threshold = math.clamp(ping / 10, 5, 17)
             local speed = velocity.Magnitude
-            
             local capped_speed_diff = math.min(math.max(speed - 9.5, 0), 650)
             local speed_divisor = (2.4 + capped_speed_diff * 0.002) * System.__properties.__divisor_multiplier
             local parry_accuracy = ping_threshold + math.max(speed / speed_divisor, 9.5)
-            
             local curved = System.detection.is_curved()
-            
             if ball:FindFirstChild('AeroDynamicSlashVFX') then
                 ball.AeroDynamicSlashVFX:Destroy()
                 System.__properties.__tornado_time = tick()
             end
-            
             if Runtime:FindFirstChild('Tornado') then
                 if (tick() - System.__properties.__tornado_time) < 
                    (Runtime.Tornado:GetAttribute('TornadoTime') or 1) + 0.314159 then
                     continue
                 end
             end
-            
             if one_ball and one_ball:GetAttribute('target') == LocalPlayer.Name and curved then
                 continue
             end
-            
             if ball:FindFirstChild('ComboCounter') then continue end
-            
             if LocalPlayer.Character.PrimaryPart:FindFirstChild('SingularityCape') then continue end
             
-            if System.__config.__detections.__infinity and System.__properties.__infinity_active then continue end
-            if System.__config.__detections.__deathslash and System.__properties.__deathslash_active then continue end
-            if System.__config.__detections.__timehole and System.__properties.__timehole_active then continue end
-            if System.__config.__detections.__slashesoffury and System.__properties.__slashesoffury_active then continue end
+            
+            
             
             if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
                 if getgenv().CooldownProtection then
                     local ParryCD = LocalPlayer.PlayerGui.Hotbar.Block.UIGradient
                     if ParryCD.Offset.Y < 0.4 then
-                        ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
+                        ParryRemote:FireServer()
                         continue
                     end
                 end
-                
                 if getgenv().AutoAbility then
                     local AbilityCD = LocalPlayer.PlayerGui.Hotbar.Ability.UIGradient
                     if AbilityCD.Offset.Y == 0.5 then
-                        if LocalPlayer.Character.Abilities:FindFirstChild('Raging Deflection') and LocalPlayer.Character.Abilities['Raging Deflection'].Enabled or
-                           LocalPlayer.Character.Abilities:FindFirstChild('Rapture') and LocalPlayer.Character.Abilities['Rapture'].Enabled or
-                           LocalPlayer.Character.Abilities:FindFirstChild('Calming Deflection') and LocalPlayer.Character.Abilities['Calming Deflection'].Enabled or
-                           LocalPlayer.Character.Abilities:FindFirstChild('Aerodynamic Slash') and LocalPlayer.Character.Abilities['Aerodynamic Slash'].Enabled or
-                           LocalPlayer.Character.Abilities:FindFirstChild('Fracture') and LocalPlayer.Character.Abilities['Fracture'].Enabled or
-                           LocalPlayer.Character.Abilities:FindFirstChild('Death Slash') and LocalPlayer.Character.Abilities['Death Slash'].Enabled then
+                        if LocalPlayer.Character.Abilities:FindFirstChild("Raging Deflection") and LocalPlayer.Character.Abilities["Raging Deflection"].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild("Rapture") and LocalPlayer.Character.Abilities["Rapture"].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild("Calming Deflection") and LocalPlayer.Character.Abilities["Calming Deflection"].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild("Aerodynamic Slash") and LocalPlayer.Character.Abilities["Aerodynamic Slash"].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild("Fracture") and LocalPlayer.Character.Abilities["Fracture"].Enabled or
+                           LocalPlayer.Character.Abilities:FindFirstChild("Death Slash") and LocalPlayer.Character.Abilities["Death Slash"].Enabled then
                             System.__properties.__parried = true
-                            ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
+                            ParryRemote:FireServer()
                             task.wait(2.432)
-                            ReplicatedStorage:WaitForChild('Remotes'):WaitForChild('DeathSlashShootActivation'):FireServer(true)
+                            DeathSlashRemote:FireServer(true)
                             continue
                         end
                     end
                 end
             end
-            
             if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
-                if getgenv().AutoParryMode == 'Keypress' then
+                if getgenv().AutoParryMode == "Keypress" then
                     System.parry.keypress()
                 else
                     System.parry.execute_action()
                 end
                 System.__properties.__parried = true
             end
-            
             local last_parrys = tick()
             repeat
                 RunService.Stepped:Wait()
             until (tick() - last_parrys) >= 1 or not System.__properties.__parried
             System.__properties.__parried = false
         end
-
         if training_ball then
             local zoomies = training_ball:FindFirstChild('zoomies')
             if zoomies then
                 training_ball:GetAttributeChangedSignal('target'):Once(function()
                     System.__properties.__training_parried = false
                 end)
-                
                 if not System.__properties.__training_parried then
                     local ball_target = training_ball:GetAttribute('target')
                     local velocity = zoomies.VectorVelocity
                     local distance = LocalPlayer:DistanceFromCharacter(training_ball.Position)
                     local speed = velocity.Magnitude
-                    
                     local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
                     local ping_threshold = math.clamp(ping / 10, 5, 17)
-                    
                     local capped_speed_diff = math.min(math.max(speed - 9.5, 0), 650)
                     local speed_divisor = (2.4 + capped_speed_diff * 0.002) * System.__properties.__divisor_multiplier
                     local parry_accuracy = ping_threshold + math.max(speed / speed_divisor, 9.5)
-                    
                     if ball_target == LocalPlayer.Name and distance <= parry_accuracy then
-                        if getgenv().AutoParryMode == 'Keypress' then
+                        if getgenv().AutoParryMode == "Keypress" then
                             System.parry.keypress()
                         else
                             System.parry.execute_action()
                         end
                         System.__properties.__training_parried = true
-                        
                         local last_parrys = tick()
                         repeat
                             RunService.Stepped:Wait()
