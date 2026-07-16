@@ -28,6 +28,16 @@ local DEFAULT_THEME = {
 	Hover = Color3.fromRGB(255, 140, 200),
 }
 
+local LIGHT_THEME = {
+	Primary = Color3.fromRGB(255, 105, 180), -- Hot Pink
+	Background = Color3.fromRGB(245, 230, 240), -- Light Pink
+	Border = Color3.fromRGB(200, 150, 180),
+	Text = Color3.fromRGB(128, 80, 120),
+	Icon = Color3.fromRGB(200, 100, 150),
+	Secondary = Color3.fromRGB(220, 120, 180),
+	Hover = Color3.fromRGB(255, 140, 200),
+}
+
 local DARK_THEME = {
 	Primary = Color3.fromRGB(255, 105, 180),
 	Background = Color3.fromRGB(25, 15, 20),
@@ -94,7 +104,7 @@ function SakuraUI.new(config)
 	self.SettingsFile = "SakuraUI_Settings.json"
 	
 	-- Load or create theme
-	self.Colors = self.Theme == "Sakura Dark" and DARK_THEME or DEFAULT_THEME
+	self.Colors = self.Theme == "Sakura Dark" and DARK_THEME or LIGHT_THEME
 	self:LoadSettings()
 	
 	-- Create main GUI
@@ -319,22 +329,6 @@ function SakuraUI:CreateTab(tabName, icon)
 		self:SelectTab(tab)
 	end)
 	
-	-- Add Tab Methods
-	function tab:CreateModule(config)
-		local module = {}
-		module.Title = config.Title or "Module"
-		module.Description = config.Description or ""
-		module.Side = config.Side or "Left"
-		module.Enabled = true
-		module.Controls = {}
-		module.Frame = nil
-		module.HeaderHeight = MODULE_HEADER_HEIGHT
-		module.ContentHeight = 0
-		
-		self:AddModule(module, tab)
-		return module
-	end
-	
 	table.insert(self.Tabs, tab)
 	return tab
 end
@@ -465,7 +459,7 @@ function SakuraUI:AddModule(module, tab)
 	function module:AddControl(controlType, config)
 		local control = self:CreateControl(controlType, config, self.ContentFrame)
 		table.insert(self.Controls, control)
-		self:UpdateModuleHeight(self)
+		self:UpdateModuleHeight()
 		return control
 	end
 	
@@ -573,7 +567,7 @@ function SakuraUI:AddModule(module, tab)
 		local sliderFill = CreateRounded("SliderFill", sliderBg, UDim2.new((control.Value - control.Min) / (control.Max - control.Min), 0, 1, 0), UDim2.new(0, 0, 0, 0), self.Colors.Primary, 3)
 		control.Fill = sliderFill
 		
-		local sliderKnob = CreateRounded("Knob", frame, UDim2.new(0, 14, 0, 14), UDim2.new(0, PADDING + ((control.Value - control.Min) / (control.Max - control.Min)) * (parent.AbsoluteSize.X - 2*PADDING) - 7, 0, 30), self.Colors.Primary, 7)
+		local sliderKnob = CreateRounded("Knob", frame, UDim2.new(0, 14, 0, 14), UDim2.new(0, PADDING + ((control.Value - control.Min) / (control.Max - control.Min)) * (sliderBg.AbsoluteSize.X - 14) - 7, 0, 30), self.Colors.Primary, 7)
 		control.Knob = sliderKnob
 		
 		local dragging = false
@@ -743,14 +737,14 @@ function SakuraUI:AddModule(module, tab)
 		-- HSV Picker Area
 		local pickerArea = CreateRounded("PickerArea", frame, UDim2.new(1, -2*PADDING, 0, 25), UDim2.new(0, PADDING, 0, 30), Color3.new(1, 1, 1), 4)
 		control.PickerArea = pickerArea
+		pickerArea.Visible = false
 		
 		-- Hue Bar
 		local hueBar = CreateRounded("HueBar", pickerArea, UDim2.new(0.15, 0, 1, 0), UDim2.new(0, 0, 0, 0), Color3.new(1, 0, 0), 3)
 		
 		colorBox.MouseButton1Click:Connect(function()
 			-- Toggle picker visibility
-			local pickerOpen = pickerArea.Visible
-			pickerArea.Visible = not pickerOpen
+			pickerArea.Visible = not pickerArea.Visible
 		end)
 		
 		return control
@@ -925,20 +919,22 @@ function SakuraUI:AddModule(module, tab)
 		return control
 	end
 	
-	function module:UpdateModuleHeight(module)
+	function module:UpdateModuleHeight()
 		local totalHeight = MODULE_HEADER_HEIGHT
 		
-		for _, control in ipairs(module.Controls) do
+		for _, control in ipairs(self.Controls) do
 			if control.Frame then
 				totalHeight = totalHeight + control.Frame.AbsoluteSize.Y + 10
 			end
 		end
 		
-		Tween(module.Frame, TweenInfo.new(ANIMATION_SPEED), {Size = UDim2.new(1, 0, 0, totalHeight)})
-		Tween(module.ContentFrame, TweenInfo.new(ANIMATION_SPEED), {Size = UDim2.new(1, 0, 0, totalHeight - MODULE_HEADER_HEIGHT)})
+		Tween(self.Frame, TweenInfo.new(ANIMATION_SPEED), {Size = UDim2.new(1, 0, 0, totalHeight)})
+		Tween(self.ContentFrame, TweenInfo.new(ANIMATION_SPEED), {Size = UDim2.new(1, 0, 0, totalHeight - MODULE_HEADER_HEIGHT)})
 	end
 	
 	table.insert(tab.Modules, module)
+	module.Controls = {}
+	module.Parent = self
 end
 
 function SakuraUI:UpdateModuleState(module, toggleBtn, toggleLabel, moduleFrame, contentFrame, headerFrame)
@@ -1066,8 +1062,82 @@ function SakuraUI:CreateSettingsTab()
 end
 
 function SakuraUI:ApplyTheme()
-	-- Update all colors in the UI
-	-- This would iterate through all elements and update their colors
+	-- Update main container colors
+	self.MainContainer.BackgroundColor3 = self.Colors.Background
+	
+	-- Update sidebar colors
+	self.Sidebar.BackgroundColor3 = self.Colors.Secondary
+	
+	-- Update content area colors
+	self.ContentArea.BackgroundColor3 = self.Colors.Background
+	self.TopIndicator.BackgroundColor3 = self.Colors.Primary
+	
+	-- Update shadow
+	for _, child in pairs(self.MainContainer:GetChildren()) do
+		if child:IsA("UIStroke") then
+			child.Color = self.Colors.Border
+		end
+	end
+	
+	-- Update all tab buttons
+	for _, tab in ipairs(self.Tabs) do
+		if tab.TabButton then
+			if tab == self.CurrentTab then
+				tab.TabButton.BackgroundColor3 = self.Colors.Primary
+			else
+				tab.TabButton.BackgroundColor3 = self.Colors.Hover
+			end
+			
+			-- Update tab button text colors
+			for _, child in pairs(tab.TabButton:GetChildren()) do
+				if child:IsA("TextLabel") then
+					child.TextColor3 = self.Colors.Text
+				end
+			end
+		end
+		
+		-- Update modules in tab
+		for _, module in ipairs(tab.Modules) do
+			if module.Frame then
+				module.Frame.BackgroundColor3 = self.Colors.Secondary
+				
+				-- Update module header
+				local headerFrame = module.Frame:FindFirstChild("Header")
+				if headerFrame then
+					for _, child in pairs(headerFrame:GetChildren()) do
+						if child:IsA("TextLabel") then
+							if child.Name == "Title" then
+								child.TextColor3 = self.Colors.Text
+							elseif child.Name == "Description" then
+								child.TextColor3 = self.Colors.Icon
+							end
+						elseif child:IsA("Frame") and child.Name == "ToggleBtn" then
+							child.BackgroundColor3 = module.Enabled and self.Colors.Primary or self.Colors.Hover
+						end
+					end
+				end
+				
+				-- Update content frame
+				if module.ContentFrame then
+					for _, control in pairs(module.ContentFrame:GetChildren()) do
+						if control:IsA("Frame") then
+							control.BackgroundColor3 = self.Colors.Hover
+							
+							-- Update nested labels
+							for _, label in pairs(control:GetChildren()) do
+								if label:IsA("TextLabel") and label.Name ~= "UICorner" then
+									if not label.BackgroundTransparency or label.BackgroundTransparency < 1 then
+										label.BackgroundColor3 = self.Colors.Hover
+									end
+									label.TextColor3 = self.Colors.Text
+								end
+							end
+						end
+					end
+				end
+			end
+		end
+	end
 end
 
 function SakuraUI:SaveSettings()
@@ -1097,3 +1167,4 @@ function SakuraUI:LoadSettings()
 end
 
 return SakuraUI
+
