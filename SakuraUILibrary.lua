@@ -26,24 +26,30 @@ Library.__index = Library
 ----------------------------------------------------------------
 Library.Themes = {
 	["Sakura Light"] = {
-		Background = Color3.fromRGB(255, 235, 242),
-		Sidebar    = Color3.fromRGB(255, 222, 233),
-		Module     = Color3.fromRGB(255, 245, 248),
-		Primary    = Color3.fromRGB(255, 133, 178),
-		Border     = Color3.fromRGB(255, 197, 214),
-		Text       = Color3.fromRGB(138, 88, 103),
-		SubText    = Color3.fromRGB(178, 128, 143),
-		Icon       = Color3.fromRGB(255, 133, 178),
+		Background            = Color3.fromRGB(255, 205, 224),
+		BackgroundTransparency = 0.18,
+		Sidebar                = Color3.fromRGB(255, 196, 219),
+		SidebarTransparency    = 0.12,
+		Module                 = Color3.fromRGB(255, 224, 236),
+		ModuleTransparency     = 0.08,
+		Primary                = Color3.fromRGB(255, 133, 178),
+		Border                 = Color3.fromRGB(219, 90, 138),
+		Text                   = Color3.fromRGB(138, 88, 103),
+		SubText                = Color3.fromRGB(178, 128, 143),
+		Icon                   = Color3.fromRGB(255, 133, 178),
 	},
 	["Sakura Dark"] = {
-		Background = Color3.fromRGB(28, 19, 23),
-		Sidebar    = Color3.fromRGB(22, 15, 18),
-		Module     = Color3.fromRGB(37, 25, 30),
-		Primary    = Color3.fromRGB(255, 133, 178),
-		Border     = Color3.fromRGB(58, 39, 46),
-		Text       = Color3.fromRGB(240, 222, 227),
-		SubText    = Color3.fromRGB(173, 145, 154),
-		Icon       = Color3.fromRGB(255, 133, 178),
+		Background            = Color3.fromRGB(42, 22, 32),
+		BackgroundTransparency = 0.15,
+		Sidebar                = Color3.fromRGB(34, 17, 26),
+		SidebarTransparency    = 0.1,
+		Module                 = Color3.fromRGB(50, 27, 38),
+		ModuleTransparency     = 0.08,
+		Primary                = Color3.fromRGB(255, 133, 178),
+		Border                 = Color3.fromRGB(196, 74, 122),
+		Text                   = Color3.fromRGB(240, 222, 227),
+		SubText                = Color3.fromRGB(173, 145, 154),
+		Icon                   = Color3.fromRGB(255, 133, 178),
 	},
 }
 
@@ -74,7 +80,7 @@ local function Tween(inst, props, duration, style, direction)
 end
 
 local function Corner(radius)
-	return Create("UICorner", {CornerRadius = UDim.new(0, radius or 8)})
+	return Create("UICorner", {CornerRadius = UDim.new(0, radius or 12)})
 end
 
 local function Stroke(color, thickness)
@@ -136,6 +142,27 @@ local function Fade(inst, visible, duration)
 			if inst then inst.Visible = false end
 		end)
 	end
+end
+
+local function ApplyShine(label, baseColor)
+	local grad = Create("UIGradient", {
+		Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, baseColor),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 250, 235)),
+			ColorSequenceKeypoint.new(1, baseColor),
+		}),
+		Offset = Vector2.new(-1, 0),
+		Parent = label,
+	})
+	task.spawn(function()
+		while grad.Parent do
+			grad.Offset = Vector2.new(-1, 0)
+			local tw = Tween(grad, {Offset = Vector2.new(1, 0)}, 2.2, Enum.EasingStyle.Linear, Enum.EasingDirection.InOut)
+			tw.Completed:Wait()
+			task.wait(0.4)
+		end
+	end)
+	return grad
 end
 
 ----------------------------------------------------------------
@@ -208,13 +235,16 @@ function Library.new(config)
 		Size = UDim2.new(0, 640, 0, 420),
 		Position = UDim2.new(0.5, -320, 0.5, -210),
 		BackgroundColor3 = self.Theme.Background,
+		BackgroundTransparency = self.Theme.BackgroundTransparency or 0,
 		BorderSizePixel = 0,
 		ClipsDescendants = true,
 		Parent = screenGui,
 	})
-	Corner(10).Parent = main
-	Stroke(self.Theme.Border, 1).Parent = main
+	Corner(20).Parent = main
+	local mainStroke = Stroke(self.Theme.Border, 1.5)
+	mainStroke.Parent = main
 	self.Main = main
+	self.MainStroke = mainStroke
 
 	-- drop shadow
 	local shadow = Create("ImageLabel", {
@@ -248,6 +278,17 @@ function Library.new(config)
 		Parent = main,
 	})
 
+	-- invisible hit-area behind the bar's visible elements: handles dragging and,
+	-- while minimized, reopening the UI by clicking anywhere on the collapsed bar
+	local hitArea = Create("TextButton", {
+		Name = "HitArea",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundTransparency = 1,
+		AutoButtonColor = false,
+		Text = "",
+		Parent = topBar,
+	})
+
 	local minimizeBtn = Create("TextButton", {
 		Name = "MinimizeButton",
 		Size = UDim2.new(0, 26, 0, 26),
@@ -260,7 +301,7 @@ function Library.new(config)
 		TextSize = 16,
 		Parent = topBar,
 	})
-	Corner(6).Parent = minimizeBtn
+	Corner(10).Parent = minimizeBtn
 	Hover(minimizeBtn, self.Theme.Primary, function() return self.Theme.Sidebar end)
 
 	local logo = Create("ImageLabel", {
@@ -286,6 +327,7 @@ function Library.new(config)
 		Parent = topBar,
 	})
 	self.TitleLabel = titleLabel
+	self.TitleGradient = ApplyShine(titleLabel, self.Theme.Text)
 
 	----------------------------------------------------------------
 	-- SIDEBAR
@@ -295,10 +337,23 @@ function Library.new(config)
 		Size = UDim2.new(0, self.SidebarWidth, 1, -40),
 		Position = UDim2.new(0, 0, 0, 40),
 		BackgroundColor3 = self.Theme.Sidebar,
+		BackgroundTransparency = self.Theme.SidebarTransparency or 0,
 		BorderSizePixel = 0,
 		Parent = main,
 	})
+	Corner(20).Parent = sidebar
+	-- square off the inner-right edge so only the outer corners look rounded
+	local sidebarPatch = Create("Frame", {
+		Name = "Patch",
+		Size = UDim2.new(0, 20, 1, 0),
+		Position = UDim2.new(1, -20, 0, 0),
+		BackgroundColor3 = self.Theme.Sidebar,
+		BackgroundTransparency = self.Theme.SidebarTransparency or 0,
+		BorderSizePixel = 0,
+		Parent = sidebar,
+	})
 	self.Sidebar = sidebar
+	self.SidebarPatch = sidebarPatch
 
 	local tabList = Create("Frame", {
 		Name = "TabList",
@@ -340,48 +395,72 @@ function Library.new(config)
 	self.Content = content
 
 	----------------------------------------------------------------
-	-- MINIMIZE BEHAVIOR
+	-- MINIMIZE BEHAVIOR (collapses toward the title; the button then
+	-- hides itself — click anywhere on the collapsed bar to reopen)
 	----------------------------------------------------------------
-	minimizeBtn.MouseButton1Click:Connect(function()
-		self.Minimized = not self.Minimized
-		if self.Minimized then
-			Fade(content, false, 0.2)
-			Tween(main, {Size = UDim2.new(0, self.SidebarWidth, 0, 420)}, 0.3)
+	local function setMinimized(state)
+		self.Minimized = state
+		if state then
+			local textW = (titleLabel.TextBounds and titleLabel.TextBounds.X > 0) and titleLabel.TextBounds.X or 100
+			local pillWidth = titleLabel.Position.X.Offset + textW + 18
+			sidebar.Visible = false
+			content.Visible = false
+			Tween(main, {Size = UDim2.new(0, pillWidth, 0, 40)}, 0.3)
+			Tween(minimizeBtn, {BackgroundTransparency = 1, TextTransparency = 1}, 0.15)
+			task.delay(0.16, function()
+				if self.Minimized then minimizeBtn.Visible = false end
+			end)
 		else
+			minimizeBtn.Visible = true
+			minimizeBtn.BackgroundTransparency = 0
+			minimizeBtn.TextTransparency = 0
 			Tween(main, {Size = UDim2.new(0, 640, 0, 420)}, 0.3)
 			task.delay(0.15, function()
-				Fade(content, true, 0.2)
+				if not self.Minimized then
+					sidebar.Visible = true
+					content.Visible = true
+				end
 			end)
 		end
-		minimizeBtn.Text = self.Minimized and "+" or "-"
+	end
+	self.SetMinimized = setMinimized
+
+	minimizeBtn.MouseButton1Click:Connect(function()
+		setMinimized(not self.Minimized)
 	end)
 
 	----------------------------------------------------------------
-	-- DRAGGING
+	-- DRAGGING + CLICK-TO-REOPEN (shared on the top-bar hit area)
 	----------------------------------------------------------------
 	do
-		local dragging, dragStart, startPos
-		topBar.InputBegan:Connect(function(input)
+		local dragging, dragStart, startPos, draggedFar
+		hitArea.InputBegan:Connect(function(input)
 			if input.UserInputType == Enum.UserInputType.MouseButton1
 				or input.UserInputType == Enum.UserInputType.Touch then
 				dragging = true
+				draggedFar = false
 				dragStart = input.Position
 				startPos = main.Position
-				input.Changed:Connect(function()
-					if input.UserInputState == Enum.UserInputState.End then
-						dragging = false
-					end
-				end)
 			end
 		end)
 		UserInputService.InputChanged:Connect(function(input)
 			if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement
 				or input.UserInputType == Enum.UserInputType.Touch) then
 				local delta = input.Position - dragStart
+				if delta.Magnitude > 5 then draggedFar = true end
 				main.Position = UDim2.new(
 					startPos.X.Scale, startPos.X.Offset + delta.X,
 					startPos.Y.Scale, startPos.Y.Offset + delta.Y
 				)
+			end
+		end)
+		UserInputService.InputEnded:Connect(function(input)
+			if dragging and (input.UserInputType == Enum.UserInputType.MouseButton1
+				or input.UserInputType == Enum.UserInputType.Touch) then
+				dragging = false
+				if not draggedFar and self.Minimized then
+					setMinimized(false)
+				end
 			end
 		end)
 	end
@@ -397,17 +476,34 @@ end
 function Library:ApplyTheme()
 	local t = self.Theme
 	self.Main.BackgroundColor3 = t.Background
+	self.Main.BackgroundTransparency = t.BackgroundTransparency or 0
+	if self.MainStroke then self.MainStroke.Color = t.Border end
 	self.Sidebar.BackgroundColor3 = t.Sidebar
+	self.Sidebar.BackgroundTransparency = t.SidebarTransparency or 0
+	if self.SidebarPatch then
+		self.SidebarPatch.BackgroundColor3 = t.Sidebar
+		self.SidebarPatch.BackgroundTransparency = t.SidebarTransparency or 0
+	end
 	self.TitleLabel.TextColor3 = t.Text
+	if self.TitleGradient then
+		self.TitleGradient.Color = ColorSequence.new({
+			ColorSequenceKeypoint.new(0, t.Text),
+			ColorSequenceKeypoint.new(0.5, Color3.fromRGB(255, 250, 235)),
+			ColorSequenceKeypoint.new(1, t.Text),
+		})
+	end
 	self.Pin.BackgroundColor3 = t.Primary
 	for _, tab in ipairs(self.Tabs) do
-		tab.Button.BackgroundColor3 = t.Sidebar
+		tab.Card.BackgroundColor3 = t.Sidebar
 		tab.Label.TextColor3 = t.Text
 		tab.Icon.ImageColor3 = t.Icon
 		for _, scroll in ipairs({tab.LeftScroll, tab.RightScroll}) do
 			for _, mod in ipairs(scroll:GetChildren()) do
 				if mod:IsA("Frame") and mod:GetAttribute("IsModule") then
 					mod.BackgroundColor3 = t.Module
+					mod.BackgroundTransparency = t.ModuleTransparency or 0
+					local st = mod:FindFirstChildOfClass("UIStroke")
+					if st then st.Color = t.Border end
 				end
 			end
 		end
@@ -429,15 +525,25 @@ function Library:CreateTab(name, icon)
 	local t = self.Theme
 	local isFirst = (#self.Tabs == 0)
 
+	-- outer button only participates in the sidebar's list layout / hit area;
+	-- the inner "Card" is what actually moves when the tab becomes active,
+	-- so it can rise without UIListLayout fighting a manual Position tween
 	local btn = Create("TextButton", {
 		Name = name,
 		Size = UDim2.new(1, 0, 0, 34),
-		BackgroundColor3 = t.Sidebar,
+		BackgroundTransparency = 1,
 		AutoButtonColor = false,
 		Text = "",
 		Parent = self.TabList,
 	})
-	Corner(6).Parent = btn
+
+	local card = Create("Frame", {
+		Name = "Card",
+		Size = UDim2.new(1, 0, 1, 0),
+		BackgroundColor3 = t.Sidebar,
+		Parent = btn,
+	})
+	Corner(14).Parent = card
 
 	local ic = Create("ImageLabel", {
 		Size = UDim2.new(0, 18, 0, 18),
@@ -445,7 +551,7 @@ function Library:CreateTab(name, icon)
 		BackgroundTransparency = 1,
 		Image = icon or "rbxassetid://7733960981",
 		ImageColor3 = t.Icon,
-		Parent = btn,
+		Parent = card,
 	})
 
 	local lbl = Create("TextLabel", {
@@ -457,10 +563,10 @@ function Library:CreateTab(name, icon)
 		TextSize = 14,
 		TextColor3 = t.Text,
 		TextXAlignment = Enum.TextXAlignment.Left,
-		Parent = btn,
+		Parent = card,
 	})
 
-	Hover(btn, t.Primary, function() return t.Sidebar end)
+	Hover(card, t.Primary, function() return t.Sidebar end)
 
 	-- page holding two scroll columns
 	local page = Create("Frame", {
@@ -523,6 +629,7 @@ function Library:CreateTab(name, icon)
 	local tabObj = {
 		Name = name,
 		Button = btn,
+		Card = card,
 		Icon = ic,
 		Label = lbl,
 		Page = page,
@@ -549,10 +656,14 @@ end
 
 function Library:SelectTab(tabObj)
 	for _, tab in ipairs(self.Tabs) do
-		if tab.Page.Visible and tab ~= tabObj then
-			Fade(tab.Page, false, 0.15)
+		if tab ~= tabObj then
+			Tween(tab.Card, {Position = UDim2.new(0, 0, 0, 0)}, 0.2)
+			if tab.Page.Visible then
+				Fade(tab.Page, false, 0.15)
+			end
 		end
 	end
+	Tween(tabObj.Card, {Position = UDim2.new(0, 0, 0, -4)}, 0.2)
 	Fade(tabObj.Page, true, 0.15)
 	Tween(self.Pin, {Position = UDim2.new(0, 0, 0, tabObj.Button.Position.Y.Offset + 8)}, 0.25)
 	self.ActiveTab = tabObj
@@ -581,8 +692,8 @@ function Library.TabMeta:CreateModule(config)
 		Parent = side,
 	})
 	moduleFrame:SetAttribute("IsModule", true)
-	Corner(8).Parent = moduleFrame
-	Stroke(t.Border, 1).Parent = moduleFrame
+	Corner(16).Parent = moduleFrame
+	Stroke(t.Border, 1.2).Parent = moduleFrame
 
 	-- header
 	local header = Create("Frame", {
@@ -629,7 +740,7 @@ function Library.TabMeta:CreateModule(config)
 			TextColor3 = t.Text,
 			Parent = header,
 		})
-		Corner(5).Parent = keybindBtn
+		Corner(10).Parent = keybindBtn
 	end
 
 	-- master enable toggle top-right
@@ -816,7 +927,7 @@ function Library.ModuleMeta:CreateButton(config)
 		TextColor3 = t.Text,
 		Parent = self.Options,
 	})
-	Corner(6).Parent = btn
+	Corner(12).Parent = btn
 	Hover(btn, t.Primary, function() return t.Sidebar end)
 	btn.MouseButton1Click:Connect(function()
 		Ripple(btn, t.Primary)
@@ -979,7 +1090,7 @@ function Library.ModuleMeta:CreateDropdown(config)
 		ClipsDescendants = true,
 		Parent = self.Options,
 	})
-	Corner(6).Parent = row
+	Corner(12).Parent = row
 
 	local head = Create("TextButton", {
 		Size = UDim2.new(1, 0, 0, 30),
@@ -1034,7 +1145,7 @@ function Library.ModuleMeta:CreateDropdown(config)
 				TextColor3 = t.Text,
 				Parent = list,
 			})
-			Corner(5).Parent = optBtn
+			Corner(10).Parent = optBtn
 			Hover(optBtn, t.Primary, function() return t.Module end)
 			optBtn.MouseButton1Click:Connect(function()
 				selected = opt
@@ -1087,7 +1198,7 @@ function Library.ModuleMeta:CreateMultiDropdown(config)
 		ClipsDescendants = true,
 		Parent = self.Options,
 	})
-	Corner(6).Parent = row
+	Corner(12).Parent = row
 
 	local head = Create("TextButton", {
 		Size = UDim2.new(1, 0, 0, 30),
@@ -1135,7 +1246,7 @@ function Library.ModuleMeta:CreateMultiDropdown(config)
 			TextColor3 = t.Text,
 			Parent = list,
 		})
-		Corner(5).Parent = optBtn
+		Corner(10).Parent = optBtn
 		optBtn.MouseButton1Click:Connect(function()
 			selected[opt] = not selected[opt] or nil
 			optBtn.BackgroundColor3 = selected[opt] and t.Primary or t.Module
@@ -1195,7 +1306,7 @@ function Library.ModuleMeta:CreateColorPicker(config)
 		Text = "",
 		Parent = row,
 	})
-	Corner(5).Parent = swatch
+	Corner(10).Parent = swatch
 	Stroke(t.Border, 1).Parent = swatch
 
 	-- popout picker (hue/sat/val simplified via 3 sliders)
@@ -1207,7 +1318,7 @@ function Library.ModuleMeta:CreateColorPicker(config)
 		ZIndex = 10,
 		Parent = self.Options,
 	})
-	Corner(6).Parent = picker
+	Corner(12).Parent = picker
 	Stroke(t.Border, 1).Parent = picker
 
 	local function makeChannelSlider(labelText, order, initial, onChange)
@@ -1302,7 +1413,7 @@ function Library.ModuleMeta:CreateTextbox(config)
 		BackgroundColor3 = t.Sidebar,
 		Parent = self.Options,
 	})
-	Corner(6).Parent = row
+	Corner(12).Parent = row
 	local box = Create("TextBox", {
 		Size = UDim2.new(1, -16, 1, 0),
 		Position = UDim2.new(0, 8, 0, 0),
@@ -1357,7 +1468,7 @@ function Library.ModuleMeta:CreateKeybind(config)
 		TextColor3 = t.Text,
 		Parent = row,
 	})
-	Corner(5).Parent = btn
+	Corner(10).Parent = btn
 
 	btn.MouseButton1Click:Connect(function()
 		listening = true
