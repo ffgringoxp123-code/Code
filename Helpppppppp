@@ -1,4 +1,4 @@
-local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/ffgringoxp123-code/Bufffl/refs/heads/main/6tb6bt8untv5ce6bt7by"))()
+local Library = loadstring(game:HttpGet("https://sakurapaste.lovable.app/raw/mlsp7kg4ti"))()
 
 local Window = Library:CreateWindow({
     Title = "Sakura"
