@@ -1,0 +1,456 @@
+local Library = loadstring(game:HttpGet("https://raw.githubusercontent.com/ffgringoxp123-code/Bufffl/refs/heads/main/6tb6bt8untv5ce6bt7by"))()
+
+local Window = Library:CreateWindow({
+    Title = "Sakura"
+})
+
+local Combat = Window:CreateTab({
+    Title = "Combat",
+    Icon = "rbxassetid://7733960981"
+})
+
+getgenv().AutoParry_Enabled = false
+getgenv().AutoParry_Mode = "Remote"
+getgenv().AutoParry_Accuracy = 50
+getgenv().AutoParry_Cooldown = false
+getgenv().AutoParry_Ability = false
+getgenv().AutoSpam_Enabled = false
+getgenv().AutoSpam_Mode = "Execute"
+getgenv().AutoSpam_Rate = 55
+getgenv().AutoSpam_AnimFix = false
+getgenv().AutoSpam_Threshold = 1.5
+
+repeat task.wait() until game:IsLoaded()
+
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
+local Stats = game:GetService("Stats")
+local VIM = game:GetService("VirtualInputManager")
+local LP = Players.LocalPlayer
+
+if not LP.Character then LP.CharacterAdded:Wait() end
+local Alive = workspace:FindFirstChild("Alive") or workspace:WaitForChild("Alive")
+local RT = workspace:FindFirstChild("Runtime") or workspace:WaitForChild("Runtime")
+
+local St = {parries = 0, parried = false, gAnim = nil, divisor = 1.0}
+local PF = nil
+if ReplicatedStorage:FindFirstChild("Controllers") then
+    for _, c in pairs(ReplicatedStorage.Controllers:GetChildren()) do
+        if c.Name:match("^SwordsController") then SC = c end
+    end
+end
+if LP.PlayerGui:FindFirstChild("Hotbar") and LP.PlayerGui.Hotbar:FindFirstChild("Block") then
+    for _, v in next, getconnections(LP.PlayerGui.Hotbar.Block.Activated) do
+        if SC and getfenv(v.Function).script == SC then PF = v.Function; break end
+    end
+end
+
+local function send_parry()
+    if St.parries > 10000 then return end
+    pcall(function()
+        VIM:SendKeyEvent(true, Enum.KeyCode.F, false, game)
+        task.defer(function() pcall(function() VIM:SendKeyEvent(false, Enum.KeyCode.F, false, game) end) end)
+    end)
+    St.parries = St.parries + 1
+    task.delay(0.5, function() if St.parries > 0 then St.parries = St.parries - 1 end end)
+end
+
+local function exec_parry()
+    if St.parries > 10000 or not LP.Character then return end
+    if getgenv().AutoParry_Mode == "Keypress" then
+        if PF then PF() end
+    else
+        send_parry()
+    end
+end
+
+local function play_anim()
+    local char = LP.Character
+    if not char then return end
+    local hum = char:FindFirstChildOfClass('Humanoid')
+    local anim = hum and hum:FindFirstChildOfClass('Animator')
+    if not hum or not anim then return end
+    
+    local sword = char:GetAttribute('CurrentlyEquippedSword')
+    if not sword then return end
+    
+    local api = ReplicatedStorage:FindFirstChild("Shared")
+    if api then
+        api = api:FindFirstChild("SwordAPI")
+        if api then api = api:FindFirstChild("Collection") end
+    end
+    if not api then return end
+    
+    local pa = api:FindFirstChild('Default')
+    if pa then pa = pa:FindFirstChild('GrabParry') end
+    if not pa then return end
+    
+    local data = ReplicatedStorage:FindFirstChild("Shared")
+    if data then
+        data = data:FindFirstChild("ReplicatedInstances")
+        if data then data = data:FindFirstChild("Swords")
+            if data then data = data:FindFirstChild("GetSword") end
+        end
+    end
+    if data then
+        local success, swordData = pcall(function() return data:Invoke(sword) end)
+        if success and swordData and swordData['AnimationType'] then
+            for _, o in pairs(api:GetChildren()) do
+                if o.Name == swordData['AnimationType'] then
+                    if o:FindFirstChild('GrabParry') then pa = o.GrabParry
+                    elseif o:FindFirstChild('Grab') then pa = o.Grab end
+                end
+            end
+        end
+    end
+    
+    if St.gAnim and St.gAnim.IsPlaying then St.gAnim:Stop() end
+    St.gAnim = anim:LoadAnimation(pa)
+    St.gAnim.Priority = Enum.AnimationPriority.Action4
+    St.gAnim:Play()
+end
+
+local function parry_action()
+    play_anim()
+    exec_parry()
+end
+
+local function get_ball()
+    local b = workspace:FindFirstChild('Balls')
+    if b then
+        for _, v in pairs(b:GetChildren()) do
+            if v:GetAttribute('realBall') then return v end
+        end
+    end
+    return nil
+end
+
+local function get_balls()
+    local t = {}
+    local b = workspace:FindFirstChild('Balls')
+    if b then
+        for _, v in pairs(b:GetChildren()) do
+            if v:GetAttribute('realBall') then table.insert(t, v) end
+        end
+    end
+    return t
+end
+
+ReplicatedStorage.Remotes.ParrySuccessAll.OnClientEvent:Connect(function()
+    if St.gAnim then St.gAnim:Stop() end
+end)
+
+ReplicatedStorage.Remotes.ParrySuccess.OnClientEvent:Connect(function()
+    if Alive and LP.Character and LP.Character.Parent == Alive and St.gAnim then
+        St.gAnim:Stop()
+    end
+end)
+
+ReplicatedStorage.Remotes.InfinityBall.OnClientEvent:Connect(function(a, b)
+    St.inf = b or false
+end)
+
+ReplicatedStorage.Remotes.DeathBall.OnClientEvent:Connect(function(c, d)
+    St.ds = d or false
+end)
+
+local function findNet()
+    local pkg = ReplicatedStorage:FindFirstChild("Packages")
+    if not pkg then return end
+    local idx = pkg:FindFirstChild("_Index")
+    if not idx then return end
+    for _, v in pairs(idx:GetChildren()) do
+        if v.Name:find("sleitnick_net") then
+            local n = v:FindFirstChild("net")
+            if n then return n end
+        end
+    end
+end
+
+local net = findNet()
+if net then
+    local re = net:FindFirstChild("RE")
+    if re then
+        local thA = re:FindFirstChild("TimeHoleActivate")
+        local thD = re:FindFirstChild("TimeHoleDeactivate")
+        local fA = re:FindFirstChild("SlashesOfFuryActivate")
+        local fE = re:FindFirstChild("SlashesOfFuryEnd")
+        local fP = re:FindFirstChild("SlashesOfFuryParry")
+        local fC = re:FindFirstChild("SlashesOfFuryCatch")
+        
+        if thA then thA.OnClientEvent:Connect(function(...)
+            local a = {...}; local p = a[1]
+            if p == LP or p == LP.Name then St.th = true end
+        end) end
+        if thD then thD.OnClientEvent:Connect(function() St.th = false end) end
+        if fA then fA.OnClientEvent:Connect(function(...)
+            local a = {...}; local p = a[1]
+            if p == LP or p == LP.Name then St.fury = true; St.fc = 0 end
+        end) end
+        if fE then fE.OnClientEvent:Connect(function() St.fury = false; St.fc = 0 end) end
+        if fP then fP.OnClientEvent:Connect(function() St.fc = (St.fc or 0) + 1 end) end
+        if fC then fC.OnClientEvent:Connect(function()
+            spawn(function()
+                while St.fury and (St.fc or 0) < 36 do exec_parry(); task.wait(0.05) end
+            end)
+        end) end
+    end
+end
+
+local apRunning = false
+
+function startAP()
+    if apRunning then return end
+    apRunning = true
+    
+    St.divisor = 0.75 + (getgenv().AutoParry_Accuracy - 1) * (3/99)
+    
+    task.spawn(function()
+        while apRunning and getgenv().AutoParry_Enabled do
+            task.wait()
+            if not LP.Character or not LP.Character.PrimaryPart then continue end
+            
+            local balls = get_balls()
+            local one = get_ball()
+            
+            for _, ball in pairs(balls) do
+                if not ball then continue end
+                local z = ball:FindFirstChild('zoomies')
+                if not z then continue end
+                
+                local tgt = ball:GetAttribute('target')
+                local vel = z.VectorVelocity
+                local lat = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 1000
+                local pred = ball.Position + vel * lat
+                local dist = (LP.Character.PrimaryPart.Position - pred).Magnitude
+                local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue() / 10
+                local pT = math.clamp(ping / 10, 5, 17)
+                local spd = vel.Magnitude
+                local csd = math.min(math.max(spd - 9.5, 0), 650)
+                local sd = (2.4 + csd * 0.002) * St.divisor
+                local acc = pT + math.max(spd / sd, 
+                if ball:FindFirstChild('AeroDynamicSlashVFX') then
+                    ball.AeroDynamicSlashVFX:Destroy()
+                    St.torn = tick()
+                end
+                
+                if RT:FindFirstChild('Tornado') and (tick() - (St.torn or tick())) < (RT.Tornado:GetAttribute('TornadoTime') or 1) + 0.314 then
+                    continue
+                end
+                
+                if ball:FindFirstChild('ComboCounter') then continue end
+                if LP.Character.PrimaryPart:FindFirstChild('SingularityCape') then continue end
+                if St.inf or St.ds or St.th or St.fury then continue end
+                
+                if tgt == LP.Name and dist <= acc then
+                    if getgenv().AutoParry_Cooldown then
+                        local cd = LP.PlayerGui.Hotbar.Block.UIGradient
+                        if cd.Offset.Y < 0.4 then
+                            ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
+                            continue
+                        end
+                    end
+                  
+                    if getgenv().AutoParry_Ability then
+                        local acd = LP.PlayerGui.Hotbar.Ability.UIGradient
+                        if acd.Offset.Y == 0.5 then
+                            local ab = LP.Character:FindFirstChild("Abilities")
+                            if ab then
+                                local ok = (ab:FindFirstChild("Raging Deflection") and ab["Raging Deflection"].Enabled) or
+                                    (ab:FindFirstChild("Rapture") and ab["Rapture"].Enabled) or
+                                    (ab:FindFirstChild("Calming Deflection") and ab["Calming Deflection"].Enabled) or
+                                    (ab:FindFirstChild("Aerodynamic Slash") and ab["Aerodynamic Slash"].Enabled) or
+                                    (ab:FindFirstChild("Fracture") and ab["Fracture"].Enabled) or
+                                    (ab:FindFirstChild("Death Slash") and ab["Death Slash"].Enabled)
+                                if ok then
+                                    St.parried = true
+                                    ReplicatedStorage.Remotes.AbilityButtonPress:Fire()
+                                    task.wait(2.432)
+                                    pcall(function() ReplicatedStorage.Remotes.DeathSlashShootActivation:FireServer(true) end)
+                                    continue
+                                end
+                            end
+                        end
+                    end
+                    
+                    parry_action()
+                    task.wait(0.5)
+                end
+            end
+        end
+        apRunning = false
+    end)
+end
+
+function stopAP()
+    apRunning = false
+end
+
+local asRunning = false
+
+function startAS()
+    if asRunning then return end
+    asRunning = true
+    
+    task.spawn(function()
+        while asRunning and getgenv().AutoSpam_Enabled do
+            task.wait()
+            
+            local ball = get_ball()
+            if not ball then continue end
+            if St.fury then continue end
+            
+            local z = ball:FindFirstChild('zoomies')
+            if not z then continue end
+            
+            -- Tìm người chơi gần nhất
+            local closest, maxD = nil, math.huge
+            if Alive then
+                for _, e in pairs(Alive:GetChildren()) do
+                    if e ~= LP.Character and e.PrimaryPart then
+                        local d = LP:DistanceFromCharacter(e.PrimaryPart.Position)
+                        if d < maxD then maxD = d; closest = e end
+                    end
+                end
+            end
+            if not closest then continue end
+            
+            local ping = Stats.Network.ServerStatsItem['Data Ping']:GetValue()
+            local pT = math.clamp(ping / 10, 1, 16)
+            local tgt = ball:GetAttribute('target')
+            if not tgt then continue end
+            
+            local tD = LP:DistanceFromCharacter(closest.PrimaryPart.Position)
+            local d = LP:DistanceFromCharacter(ball.Position)
+            local dir = (LP.Character.PrimaryPart.Position - ball.Position).Unit
+            local bD = z.VectorVelocity.Unit
+            local dot = dir:Dot(bD)
+            local spd = z.VectorVelocity.Magnitude
+            local mSD = pT + math.min(spd / 6, 255)
+            local mS = 5 - math.min(spd / 5, 5)
+            local mD = math.clamp(dot, -1, 0) * mS
+            local acc = mSD - mD
+            
+            if tD > acc or d > acc then continue end
+            if LP.Character:GetAttribute('Pulsed') then continue end
+            if tgt == LP.Name and tD > 30 and d > 30 then continue end
+            
+            if d <= acc and St.parries > getgenv().AutoSpam_Threshold then
+                if getgenv().AutoSpam_Mode == "Keypress" then
+                    if PF then PF() end
+                else
+                    exec_parry()
+                    if getgenv().AutoSpam_AnimFix and PF then PF() end
+                end
+            end
+        end
+        asRunning = false
+    end)
+end
+
+function stopAS()
+    asRunning = false
+end
+
+local AP = Combat:CreateModule({
+    Title = "Auto Parry",
+    Description = "Tự động parry đòn đánh",
+    Section = "Left",
+    Flag = "AP",
+    Callback = function(v)
+        getgenv().AutoParry_Enabled = v
+        if v then startAP() else stopAP() end
+    end
+})
+
+AP:CreateLabel({Text = "Cài đặt Auto Parry"})
+
+AP:CreateDropdown({
+    Text = "Parry Mode",
+    Options = {"Remote", "Keypress"},
+    Default = getgenv().AutoParry_Mode,
+    Callback = function(v)
+        getgenv().AutoParry_Mode = v
+    end
+})
+
+AP:CreateSlider({
+    Text = "Accuracy",
+    Description = "Độ chính xác 1-100",
+    Min = 1,
+    Max = 100,
+    Default = getgenv().AutoParry_Accuracy,
+    Callback = function(v)
+        getgenv().AutoParry_Accuracy = v
+    end
+})
+
+AP:CreateToggle({
+    Text = "Cooldown Protection",
+    Default = getgenv().AutoParry_Cooldown,
+    Callback = function(v)
+        getgenv().AutoParry_Cooldown = v
+    end
+})
+
+AP:CreateToggle({
+    Text = "Auto Ability",
+    Description = "Tự động dùng ability khi parry",
+    Default = getgenv().AutoParry_Ability,
+    Callback = function(v)
+        getgenv().AutoParry_Ability = v
+    end
+})
+
+local AS = Combat:CreateModule({
+    Title = "Auto Spam",
+    Description = "Tự động spam parry khi có bóng",
+    Section = "Right",
+    Flag = "AS",
+    Callback = function(v)
+        getgenv().AutoSpam_Enabled = v
+        if v then startAS() else stopAS() end
+    end
+})
+
+AS:CreateLabel({Text = "Cài đặt Auto Spam"})
+
+AS:CreateDropdown({
+    Text = "Spam Mode",
+    Options = {"Execute", "Keypress"},
+    Default = getgenv().AutoSpam_Mode,
+    Callback = function(v)
+        getgenv().AutoSpam_Mode = v
+    end
+})
+
+AS:CreateSlider({
+    Text = "Spam Rate",
+    Description = "Số lần spam mỗi giây",
+    Min = 1,
+    Max = 240,
+    Default = getgenv().AutoSpam_Rate,
+    Callback = function(v)
+        getgenv().AutoSpam_Rate = v
+    end
+})
+
+AS:CreateToggle({
+    Text = "Animation Fix",
+    Default = getgenv().AutoSpam_AnimFix,
+    Callback = function(v)
+        getgenv().AutoSpam_AnimFix = v
+    end
+})
+
+AS:CreateSlider({
+    Text = "Spam Threshold",
+    Description = "Ngưỡng bắt đầu spam (0.1-5)",
+    Min = 0,
+    Max = 100,
+    Default = getgenv().AutoSpam_Threshold * 20,
+    Callback = function(v)
+        getgenv().AutoSpam_Threshold = v / 20
+    end
+})
