@@ -1,227 +1,3 @@
-if getgenv()._aurorasigma then
-    -- Try to clean up the previous instance
-    pcall(function()
-        if _G.ailon_unload then _G.ailon_unload() end
-    end)
-    -- If unload didn't clear the flag, force-clear it
-    getgenv()._aurorasigma = nil
-    task.wait(0.1)  -- give cleanup a tick to complete
-end
-
-getgenv()._aurorasigma = true
-
-local ContentProvider = game:GetService("ContentProvider")
-local LogService = game:GetService("LogService")
-
-local hook = hookfunction or detour_function or (replaceclosure and function(old, new)
-    return replaceclosure(old, new)
-end)
-
-local cclosure = newcclosure or function(f)
-    return f
-end
-
-local renv = getrenv and getrenv() or _G
-
-local set_readonly = setreadonly or (make_writeable and function(t, v)
-    if v then
-        make_writeable(t)
-    else
-        make_readonly(t)
-    end
-end)
-
-local function isRelevantCaller()
-    for i = 3, 6 do
-        local src = debug.info(i, "s")
-        if src and (
-            src:find("RemoveLoadingScreen") or
-            src:find("Loading") or
-            src:find("Detection")
-        ) then
-            return true
-        end
-    end
-
-    if getcallingscript then
-        local ok, script = pcall(getcallingscript)
-        if ok and script then
-            local name = tostring(script)
-            if name:find("RemoveLoadingScreen") or name:find("Loading") then
-                return true
-            end
-        end
-    end
-
-    return false
-end
-
-local originalRandom
-originalRandom = hook(renv.math.random, cclosure(function(...)
-    if isRelevantCaller() then
-        return 0
-    end
-    return originalRandom(...)
-end))
-
-local originalPreloadAsync
-originalPreloadAsync = hook(ContentProvider.PreloadAsync, cclosure(function(self, assets, callback)
-    if self ~= ContentProvider then
-        return originalPreloadAsync(self, assets, callback)
-    end
-
-    if isRelevantCaller() and type(assets) == "table" then
-        if callback then
-            for _, asset in ipairs(assets) do
-                task.spawn(pcall, callback, asset, Enum.AssetFetchStatus.Success)
-            end
-        end
-        return
-    end
-
-    return originalPreloadAsync(self, assets, callback)
-end))
-
-local mt = getrawmetatable(game)
-if mt and set_readonly then
-    local originalNamecall = mt.__namecall
-
-    set_readonly(mt, false)
-
-    mt.__namecall = cclosure(function(self, ...)
-        local method = getnamecallmethod()
-        local args = { ... }
-
-        if method == "PreloadAsync" and self == ContentProvider and isRelevantCaller() then
-            pcall(function()
-                local assets, callback = args[1], args[2]
-                if type(assets) == "table" and callback then
-                    for _, asset in ipairs(assets) do
-                        task.spawn(pcall, callback, asset, Enum.AssetFetchStatus.Success)
-                    end
-                end
-            end)
-            return
-        end
-
-        return originalNamecall(self, ...)
-    end)
-
-    set_readonly(mt, true)
-end
-
-print("very true")
-
--- Queue the entire script to re-run on server hop/teleport so BAC bypass persists
-if queue_on_teleport then
-    local scriptSource = nil
-    
-    -- Try to get the script source for re-execution
-    if getgenv()._ailon_source then
-        scriptSource = getgenv()._ailon_source
-    else
-        -- Store the script path/source on first run
-        -- Uses the loadstring approach to re-execute from saved source
-        local success, source = pcall(function()
-            if readfile and isfile and isfile("ailon/ailon_source.lua") then
-                return readfile("ailon/ailon_source.lua")
-            end
-            return nil
-        end)
-        
-        if success and source then
-            scriptSource = source
-        end
-    end
-    
-    -- If we have source, queue it. Otherwise queue a loadstring fallback.
-    if scriptSource then
-        getgenv()._ailon_source = scriptSource
-        queue_on_teleport(scriptSource)
-    else
-        -- Fallback: re-run the bypass portion at minimum on teleport
-        queue_on_teleport([[
-            getgenv()._aurorasigma = nil -- Reset so bypass runs again
-            
-            local ContentProvider = game:GetService("ContentProvider")
-            local hook = hookfunction or detour_function or (replaceclosure and function(old, new)
-                return replaceclosure(old, new)
-            end)
-            local cclosure = newcclosure or function(f) return f end
-            local renv = getrenv and getrenv() or _G
-            local set_readonly = setreadonly or (make_writeable and function(t, v)
-                if v then make_writeable(t) else make_readonly(t) end
-            end)
-            
-            local function isRelevantCaller()
-                for i = 3, 6 do
-                    local src = debug.info(i, "s")
-                    if src and (src:find("RemoveLoadingScreen") or src:find("Loading") or src:find("Detection")) then
-                        return true
-                    end
-                end
-                if getcallingscript then
-                    local ok, script = pcall(getcallingscript)
-                    if ok and script then
-                        local name = tostring(script)
-                        if name:find("RemoveLoadingScreen") or name:find("Loading") then return true end
-                    end
-                end
-                return false
-            end
-            
-            local originalRandom
-            originalRandom = hook(renv.math.random, cclosure(function(...)
-                if isRelevantCaller() then return 0 end
-                return originalRandom(...)
-            end))
-            
-            local originalPreloadAsync
-            originalPreloadAsync = hook(ContentProvider.PreloadAsync, cclosure(function(self, assets, callback)
-                if self ~= ContentProvider then return originalPreloadAsync(self, assets, callback) end
-                if isRelevantCaller() and type(assets) == "table" then
-                    if callback then
-                        for _, asset in ipairs(assets) do
-                            task.spawn(pcall, callback, asset, Enum.AssetFetchStatus.Success)
-                        end
-                    end
-                    return
-                end
-                return originalPreloadAsync(self, assets, callback)
-            end))
-            
-            local mt = getrawmetatable(game)
-            if mt and set_readonly then
-                local originalNamecall = mt.__namecall
-                set_readonly(mt, false)
-                mt.__namecall = cclosure(function(self, ...)
-                    local method = getnamecallmethod()
-                    local args = { ... }
-                    if method == "PreloadAsync" and self == ContentProvider and isRelevantCaller() then
-                        pcall(function()
-                            local assets, callback = args[1], args[2]
-                            if type(assets) == "table" and callback then
-                                for _, asset in ipairs(assets) do
-                                    task.spawn(pcall, callback, asset, Enum.AssetFetchStatus.Success)
-                                end
-                            end
-                        end)
-                        return
-                    end
-                    return originalNamecall(self, ...)
-                end)
-                set_readonly(mt, true)
-            end
-            
-            print("BAC bypass re-applied after teleport")
-        ]])
-    end
-end
-
-if not game:IsLoaded() then
-    game.Loaded:Wait()
-end
-
 getgenv().GG = {
     Language = {
         CheckboxEnabled = "Enabled",
@@ -243,11 +19,20 @@ getgenv().GG = {
 }
 local SelectedLanguage = GG.Language
 
+-- Fallback an toàn: nếu executor không hỗ trợ các hàm này, dùng bản thay thế
+-- thay vì để script lỗi và dừng giữa chừng (khiến UI không bao giờ hiện ra).
+local cloneref = cloneref or function(instance) return instance end
+local isfolder = isfolder or function() return true end
+local makefolder = makefolder or function() end
+local writefile = writefile or function() end
+local readfile = readfile or function() return "{}" end
+local delfile = delfile or function() end
+
 function convertStringToTable(inputString)
     local result = {}
     for value in string.gmatch(inputString, "([^,]+)") do
         local trimmedValue = value:match("^%s*(.-)%s*$")
-        tablein(result, trimmedValue)
+        table.insert(result, trimmedValue)
     end
 
     return result
@@ -732,7 +517,7 @@ function Library:create_ui()
 
     local ailon = Instance.new('ScreenGui')
     ailon.ResetOnSpawn = false
-    ailon.Name = 'KITTYLOL'
+    ailon.Name = 'Sakura'
     ailon.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     ailon.Parent = CoreGui
     
@@ -741,8 +526,8 @@ function Library:create_ui()
     Container.BorderColor3 = Color3.fromRGB(20, 10, 40)
     Container.AnchorPoint = Vector2.new(0.5, 0.5)
     Container.Name = 'Container'
-    Container.BackgroundTransparency = 0.05000000074505806
-    Container.BackgroundColor3 = Color3.fromRGB(20, 10, 40)
+    Container.BackgroundTransparency = 0.15000000074505806
+    Container.BackgroundColor3 = Color3.fromRGB(38, 16, 42)
     
     local ContainerGradient = Instance.new('UIGradient')
     ContainerGradient.Color = ColorSequence.new{
@@ -801,7 +586,7 @@ function Library:create_ui()
     ClientName.FontFace = Font.new('rbxasset://fonts/families/GothamSSm.json', Enum.FontWeight.SemiBold, Enum.FontStyle.Normal)
     ClientName.TextColor3 = Color3.fromRGB(255, 255, 255)
     ClientName.TextTransparency = 0.20000000298023224
-    ClientName.Text = 'Kittylol'
+    ClientName.Text = 'Sakura'
     ClientName.Name = 'ClientName'
     ClientName.Size = UDim2.new(0, 45, 0, 18)
     ClientName.AnchorPoint = Vector2.new(0, 0.5)
@@ -895,13 +680,13 @@ function Library:create_ui()
     end)
 
     task.spawn(function()
-        local frames = {'rbxassetid://117218617893684', 'rbxassetid://117218617893684', 'rbxassetid://117218617893684'}
+        local frames = {'rbxassetid://102369650294802', 'rbxassetid://131279032025741'}
         local index = 0
         while task.wait(0.20) do
             if not Icon or not Icon.Parent then break end
             index = index + 1
             Icon.Image = frames[index]
-            if index == 3 then
+            if index == 2 then
                 index = 0
             end
         end
@@ -973,7 +758,7 @@ function Library:create_ui()
 
     function self:Update1Run(a)
         if a == "nil" then
-            Container.BackgroundTransparency = 0.05000000074505806;
+            Container.BackgroundTransparency = 0.15000000074505806;
         else
             pcall(function()
                 Container.BackgroundTransparency = tonumber(a);
@@ -3591,4 +3376,8 @@ end
     return self
 end
 
-return Library
+local main = Library.new()
+
+local rage = main:create_tab('Combat', 'rbxassetid://76499042599127')
+
+main:load()
