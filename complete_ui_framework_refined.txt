@@ -1,0 +1,439 @@
+getgenv().GG = {
+    Language = {
+        CheckboxEnabled = "Enabled",
+        CheckboxDisabled = "Disabled",
+        SliderValue = "Value",
+        DropdownSelect = "Select",
+        DropdownNone = "None",
+        DropdownSelected = "Selected",
+        ButtonClick = "Click",
+        TextboxEnter = "Enter",
+        ModuleEnabled = "Enabled",
+        ModuleDisabled = "Disabled",
+        TabGeneral = "General",
+        TabSettings = "Settings",
+        Loading = "Loading...",
+        Error = "Error",
+        Success = "Success"
+    }
+}
+local SelectedLanguage = GG.Language
+
+function convertStringToTable(inputString)
+    local result = {}
+    for value in string.gmatch(inputString, "([^,]+)") do
+        local trimmedValue = value:match("^%s*(.-)%s*$")
+        table.insert(result, trimmedValue)
+    end
+    return result
+end
+
+function convertTableToString(inputTable)
+    return table.concat(inputTable, ", ")
+end
+
+local UserInputService = cloneref(game:GetService('UserInputService'))
+local ContentProvider = cloneref(game:GetService('ContentProvider'))
+local TweenService = cloneref(game:GetService('TweenService'))
+local HttpService = cloneref(game:GetService('HttpService'))
+local TextService = cloneref(game:GetService('TextService'))
+local RunService = cloneref(game:GetService('RunService'))
+local Lighting = cloneref(game:GetService('Lighting'))
+local Players = cloneref(game:GetService('Players'))
+local CoreGui = cloneref(game:GetService('CoreGui'))
+local Debris = cloneref(game:GetService('Debris'))
+
+local mouse = Players.LocalPlayer:GetMouse()
+
+local Connections = setmetatable({
+    disconnect = function(self, connection)
+        if not self[connection] then return end
+        self[connection]:Disconnect()
+        self[connection] = nil
+    end,
+    disconnect_all = function(self)
+        for _, value in self do
+            if typeof(value) == 'function' then continue end
+            value:Disconnect()
+        end
+    end
+}, {})
+
+local Util = {
+    map = function(self, value, in_min, in_max, out_min, out_max)
+        return (value - in_min) * (out_max - out_min) / (in_max - in_min) + out_min
+    end,
+    viewport_point_to_world = function(self, location, distance)
+        local unit_ray = workspace.CurrentCamera:ScreenPointToRay(location.X, location.Y)
+        return unit_ray.Origin + unit_ray.Direction * distance
+    end,
+    get_offset = function(self)
+        local viewport_size_Y = workspace.CurrentCamera.ViewportSize.Y
+        return self:map(viewport_size_Y, 0, 2560, 8, 56)
+    end
+}
+
+local AcrylicBlur = {}
+AcrylicBlur.__index = AcrylicBlur
+
+function AcrylicBlur.new(object)
+    local self = setmetatable({
+        _object = object,
+        _folder = nil,
+        _frame = nil,
+        _root = nil
+    }, AcrylicBlur)
+    self:setup()
+    return self
+end
+
+function AcrylicBlur:create_folder()
+    local old_folder = workspace.CurrentCamera:FindFirstChild('AcrylicBlur')
+    if old_folder then Debris:AddItem(old_folder, 0) end
+    local folder = Instance.new('Folder')
+    folder.Name = 'AcrylicBlur'
+    folder.Parent = workspace.CurrentCamera
+    self._folder = folder
+end
+
+function AcrylicBlur:create_depth_of_fields()
+    local depth_of_fields = Lighting:FindFirstChild('AcrylicBlur') or Instance.new('DepthOfFieldEffect')
+    depth_of_fields.FarIntensity = 0
+    depth_of_fields.FocusDistance = 0.05
+    depth_of_fields.InFocusRadius = 0.1
+    depth_of_fields.NearIntensity = 1
+    depth_of_fields.Name = 'AcrylicBlur'
+    depth_of_fields.Parent = Lighting
+end
+
+function AcrylicBlur:create_frame()
+    local frame = Instance.new('Frame')
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundTransparency = 1
+    frame.Parent = self._object
+    self._frame = frame
+end
+
+function AcrylicBlur:create_root()
+    local part = Instance.new('Part')
+    part.Name = 'Root'
+    part.Material = Enum.Material.Glass
+    part.Size = Vector3.new(1, 1, 0)
+    part.Anchored = true
+    part.CanCollide = false
+    part.Transparency = 0.98
+    part.Parent = self._folder
+    local mesh = Instance.new('SpecialMesh')
+    mesh.MeshType = Enum.MeshType.Brick
+    mesh.Parent = part
+    self._root = part
+end
+
+function AcrylicBlur:setup()
+    self:create_depth_of_fields()
+    self:create_folder()
+    self:create_root()
+    self:create_frame()
+    self:render(0.001)
+end
+
+function AcrylicBlur:render(distance)
+    local function update()
+        if not self._frame or not self._root then return end
+        local size = self._frame.AbsoluteSize
+        local pos = self._frame.AbsolutePosition
+        local tl3D = Util:viewport_point_to_world(pos, distance)
+        local br3D = Util:viewport_point_to_world(pos + size, distance)
+        self._root.CFrame = CFrame.lookAt((tl3D + br3D) / 2, (tl3D + br3D) / 2 + workspace.CurrentCamera.CFrame.LookVector)
+        local mesh = self._root:FindFirstChildOfClass('SpecialMesh')
+        if mesh then mesh.Scale = Vector3.new((tl3D - br3D).Magnitude, (tl3D - br3D).Magnitude, 0) end
+    end
+    Connections['acrylic_render'] = RunService.RenderStepped:Connect(update)
+end
+
+local Config = {
+    save = function(self, name, data)
+        pcall(function()
+            if writefile then writefile('ailon/'..name..'.json', HttpService:JSONEncode(data)) end
+        end)
+    end,
+    load = function(self, name, default)
+        local success, result = pcall(function()
+            if isfile and isfile('ailon/'..name..'.json') then
+                return HttpService:JSONDecode(readfile('ailon/'..name..'.json'))
+            end
+        end)
+        return (success and result) or default or {_flags = {}, _keybinds = {}}
+    end
+}
+
+local Library = {
+    _config = Config:load(game.GameId, {_flags = {}, _keybinds = {}}),
+    _choosing_keybind = false,
+    _ui_open = true,
+    _tab = 0,
+    _dragging = false
+}
+Library.__index = Library
+
+function Library.new()
+    local self = setmetatable({}, Library)
+    self:create_ui()
+    return self
+end
+
+function Library.SendNotification(settings)
+    local NotificationContainer = CoreGui:FindFirstChild("RobloxGui"):FindFirstChild("CondemnedNotifications")
+    if not NotificationContainer then
+        NotificationContainer = Instance.new("Frame")
+        NotificationContainer.Name = "CondemnedNotifications"
+        NotificationContainer.Size = UDim2.new(0, 320, 0, 0)
+        NotificationContainer.Position = UDim2.new(1, -10, 1, -10)
+        NotificationContainer.AnchorPoint = Vector2.new(1, 1)
+        NotificationContainer.BackgroundTransparency = 1
+        NotificationContainer.AutomaticSize = Enum.AutomaticSize.Y
+        NotificationContainer.Parent = CoreGui:FindFirstChild("RobloxGui") or CoreGui
+        local layout = Instance.new("UIListLayout")
+        layout.VerticalAlignment = Enum.VerticalAlignment.Bottom
+        layout.Padding = UDim.new(0, 8)
+        layout.Parent = NotificationContainer
+    end
+
+    local Notification = Instance.new("Frame")
+    Notification.Size = UDim2.new(1, 0, 0, 0)
+    Notification.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    Notification.AutomaticSize = Enum.AutomaticSize.Y
+    Notification.Parent = NotificationContainer
+    Instance.new("UICorner", Notification).CornerRadius = UDim.new(0, 6)
+    local stroke = Instance.new("UIStroke", Notification)
+    stroke.Color = Color3.fromRGB(255, 105, 180)
+    stroke.Transparency = 0.5
+
+    local Title = Instance.new("TextLabel", Notification)
+    Title.Text = settings.title or "Notification"
+    Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Title.Size = UDim2.new(1, -20, 0, 20)
+    Title.Position = UDim2.new(0, 10, 0, 5)
+    Title.BackgroundTransparency = 1
+    Title.Font = Enum.Font.GothamBold
+    Title.TextXAlignment = Enum.TextXAlignment.Left
+
+    local Body = Instance.new("TextLabel", Notification)
+    Body.Text = settings.text or ""
+    Body.TextColor3 = Color3.fromRGB(200, 200, 200)
+    Body.Size = UDim2.new(1, -20, 0, 0)
+    Body.Position = UDim2.new(0, 10, 0, 25)
+    Body.BackgroundTransparency = 1
+    Body.Font = Enum.Font.Gotham
+    Body.TextXAlignment = Enum.TextXAlignment.Left
+    Body.TextWrapped = true
+    Body.AutomaticSize = Enum.AutomaticSize.Y
+
+    task.spawn(function()
+        Notification.Position = UDim2.new(1, 330, 0, 0)
+        TweenService:Create(Notification, TweenInfo.new(0.6, Enum.EasingStyle.Quint, Enum.EasingDirection.Out), {Position = UDim2.new(0, 0, 0, 0)}):Play()
+        task.wait(settings.duration or 5)
+        local tOut = TweenService:Create(Notification, TweenInfo.new(0.6, Enum.EasingStyle.Quint, Enum.EasingDirection.In), {Position = UDim2.new(1, 330, 0, 0)})
+        tOut:Play()
+        tOut.Completed:Connect(function() Notification:Destroy() end)
+    end)
+end
+
+function Library:create_ui()
+    local ailon = Instance.new('ScreenGui')
+    ailon.Name = 'KITTYLOL'
+    ailon.ResetOnSpawn = false
+    ailon.Parent = CoreGui
+    
+    local Container = Instance.new('Frame')
+    Container.Name = 'Container'
+    Container.Size = UDim2.fromOffset(680, 460)
+    Container.Position = UDim2.new(0.5, 0, 0.5, 0)
+    Container.AnchorPoint = Vector2.new(0.5, 0.5)
+    Container.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
+    Container.BackgroundTransparency = 0.05
+    Container.Parent = ailon
+    Instance.new('UICorner', Container).CornerRadius = UDim.new(0, 12)
+    local stroke = Instance.new('UIStroke', Container)
+    stroke.Color = Color3.fromRGB(255, 105, 180)
+
+    local Handler = Instance.new('Frame')
+    Handler.Name = 'Handler'
+    Handler.Size = UDim2.new(1, 0, 1, 0)
+    Handler.BackgroundTransparency = 1
+    Handler.Parent = Container
+
+    local Tabs = Instance.new('ScrollingFrame')
+    Tabs.Name = 'Tabs'
+    Tabs.Size = UDim2.new(0, 129, 0, 401)
+    Tabs.Position = UDim2.new(0.026, 0, 0.111, 0)
+    Tabs.BackgroundTransparency = 1
+    Tabs.ScrollBarThickness = 0
+    Tabs.Parent = Handler
+    local layout = Instance.new('UIListLayout', Tabs)
+    layout.Padding = UDim.new(0, 4)
+
+    local Sections = Instance.new('Folder', Handler)
+    Sections.Name = 'Sections'
+
+    -- Dragging
+    local dragStart, startPos
+    Container.InputBegan:Connect(function(input)
+        if input.UserInputType == Enum.UserInputType.MouseButton1 then
+            self._dragging = true
+            dragStart = input.Position
+            startPos = Container.Position
+            input.Changed:Connect(function()
+                if input.UserInputState == Enum.UserInputState.End then self._dragging = false end
+            end)
+        end
+    end)
+    UserInputService.InputChanged:Connect(function(input)
+        if self._dragging and input.UserInputType == Enum.UserInputType.MouseMovement then
+            local delta = input.Position - dragStart
+            Container.Position = UDim2.new(startPos.X.Scale, startPos.X.Offset + delta.X, startPos.Y.Scale, startPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    self._ui = ailon
+    AcrylicBlur.new(Container)
+end
+
+function Library:create_tab(title, icon)
+    local Tab = Instance.new('TextButton')
+    Tab.Name = 'Tab'
+    Tab.Size = UDim2.new(0, 129, 0, 38)
+    Tab.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+    Tab.Parent = self._ui.Container.Handler.Tabs
+    Instance.new("UICorner", Tab)
+
+    local Label = Instance.new('TextLabel', Tab)
+    Label.Text = title
+    Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+    Label.Size = UDim2.new(1, -10, 1, 0)
+    Label.Position = UDim2.new(0, 5, 0, 0)
+    Label.BackgroundTransparency = 1
+    Label.Font = Enum.Font.GothamBold
+
+    local SectionContainer = Instance.new('Frame', self._ui.Container.Handler.Sections)
+    SectionContainer.Size = UDim2.new(1, -140, 1, -50)
+    SectionContainer.Position = UDim2.new(0, 140, 0, 50)
+    SectionContainer.BackgroundTransparency = 1
+    SectionContainer.Visible = false
+
+    local LeftSection = Instance.new('ScrollingFrame', SectionContainer)
+    LeftSection.Size = UDim2.new(0.48, 0, 1, 0)
+    LeftSection.Position = UDim2.new(0, 0, 0, 0)
+    LeftSection.BackgroundTransparency = 1
+    LeftSection.ScrollBarThickness = 0
+    Instance.new("UIListLayout", LeftSection).Padding = UDim.new(0, 10)
+
+    local RightSection = Instance.new('ScrollingFrame', SectionContainer)
+    RightSection.Size = UDim2.new(0.48, 0, 1, 0)
+    RightSection.Position = UDim2.new(0.52, 0, 0, 0)
+    RightSection.BackgroundTransparency = 1
+    RightSection.ScrollBarThickness = 0
+    Instance.new("UIListLayout", RightSection).Padding = UDim.new(0, 10)
+
+    Tab.MouseButton1Click:Connect(function()
+        for _, s in pairs(self._ui.Container.Handler.Sections:GetChildren()) do s.Visible = false end
+        SectionContainer.Visible = true
+    end)
+
+    if self._tab == 0 then SectionContainer.Visible = true end
+    self._tab = self._tab + 1
+
+    local TabManager = {}
+
+    function TabManager:create_module(settings)
+        local targetSection = settings.section == "right" and RightSection or LeftSection
+        local Module = Instance.new('Frame', targetSection)
+        Module.Size = UDim2.new(1, 0, 0, 93)
+        Module.BackgroundColor3 = Color3.fromRGB(10, 10, 10)
+        Instance.new("UICorner", Module)
+        Instance.new("UIStroke", Module).Color = Color3.fromRGB(255, 105, 180)
+
+        local Header = Instance.new("TextButton", Module)
+        Header.Size = UDim2.new(1, 0, 0, 93)
+        Header.BackgroundTransparency = 1
+        Header.Text = ""
+
+        local Title = Instance.new('TextLabel', Header)
+        Title.Text = settings.title or "Module"
+        Title.TextColor3 = Color3.fromRGB(255, 182, 193)
+        Title.Size = UDim2.new(1, -20, 0, 20)
+        Title.Position = UDim2.new(0, 10, 0, 10)
+        Title.BackgroundTransparency = 1
+        Title.Font = Enum.Font.GothamBold
+        Title.TextXAlignment = Enum.TextXAlignment.Left
+
+        local Options = Instance.new("Frame", Module)
+        Options.Size = UDim2.new(1, -20, 0, 0)
+        Options.Position = UDim2.new(0, 10, 0, 93)
+        Options.BackgroundTransparency = 1
+        Options.ClipsDescendants = true
+        Instance.new("UIListLayout", Options).Padding = UDim.new(0, 5)
+
+        local ModuleManager = {_open = false, _height = 0}
+
+        function ModuleManager:update_height()
+            if self._open then
+                Module.Size = UDim2.new(1, 0, 0, 93 + self._height)
+                Options.Size = UDim2.new(1, 0, 0, self._height)
+            end
+        end
+
+        Header.MouseButton1Click:Connect(function()
+            ModuleManager._open = not ModuleManager._open
+            TweenService:Create(Module, TweenInfo.new(0.5, Enum.EasingStyle.Quint), {Size = UDim2.new(1, 0, 0, ModuleManager._open and (93 + ModuleManager._height) or 93)}):Play()
+            TweenService:Create(Options, TweenInfo.new(0.5, Enum.EasingStyle.Quint), {Size = UDim2.new(1, 0, 0, ModuleManager._open and ModuleManager._height or 0)}):Play()
+        end)
+
+        function ModuleManager:create_checkbox(s)
+            self._height = self._height + 25
+            local Checkbox = Instance.new("TextButton", Options)
+            Checkbox.Size = UDim2.new(1, 0, 0, 20)
+            Checkbox.BackgroundTransparency = 1
+            Checkbox.Text = s.title
+            Checkbox.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Checkbox.Font = Enum.Font.Gotham
+            Checkbox.TextXAlignment = Enum.TextXAlignment.Left
+            Checkbox.MouseButton1Click:Connect(function() s.callback(true) end)
+            self:update_height()
+        end
+
+        function ModuleManager:create_slider(s)
+            self._height = self._height + 40
+            local Slider = Instance.new("Frame", Options)
+            Slider.Size = UDim2.new(1, 0, 0, 35)
+            Slider.BackgroundTransparency = 1
+            local Label = Instance.new("TextLabel", Slider)
+            Label.Text = s.title
+            Label.Size = UDim2.new(1, 0, 0, 15)
+            Label.TextColor3 = Color3.fromRGB(255, 255, 255)
+            Label.BackgroundTransparency = 1
+            self:update_height()
+        end
+
+        function ModuleManager:create_colorpicker(s)
+            self._height = self._height + 30
+            local CP = Instance.new("TextButton", Options)
+            CP.Size = UDim2.new(1, 0, 0, 25)
+            CP.BackgroundTransparency = 1
+            CP.Text = s.title
+            CP.TextColor3 = Color3.fromRGB(255, 255, 255)
+            self:update_height()
+        end
+
+        return ModuleManager
+    end
+
+    return TabManager
+end
+
+function Library:load()
+    self._ui.Enabled = true
+    Library.SendNotification({title = "UI Loaded", text = "Framework initialized successfully."})
+end
+
+return Library
