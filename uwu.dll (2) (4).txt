@@ -30,6 +30,58 @@ end
 
 local Alive = workspace:FindFirstChild("Alive") or workspace:WaitForChild("Alive")
 local Runtime = workspace.Runtime
+
+local System = {
+    __properties = {
+        __autoparry_enabled = false,
+        __triggerbot_enabled = false,
+        __manual_spam_enabled = false,
+        __auto_spam_enabled = false,
+        __play_animation = false,
+        __curve_mode = 1,
+        __accuracy = 1,
+        __divisor_multiplier = 1.1,
+        __parried = false,
+        __training_parried = false,
+        __spam_threshold = 1.5,
+        __parries = 0,
+        __parry_key = nil,
+        __grab_animation = nil,
+        __tornado_time = tick(),
+        __first_parry_done = false,
+        __connections = {},
+        __reverted_remotes = {},
+        __spam_accumulator = 0,
+        __spam_rate = 29999909,
+        __infinity_active = false,
+        __deathslash_active = false,
+        __timehole_active = false,
+        __slashesoffury_active = false,
+        __slashesoffury_count = 0,
+        __is_mobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled,
+        __mobile_guis = {}
+    },
+    
+    __config = {
+        __curve_names = {'Camera', 'Random', 'Accelerated', 'Backwards', 'Slow', 'High'},
+        __detections = {
+            __infinity = false,
+            __deathslash = false,
+            __timehole = false,
+            __slashesoffury = false,
+            __phantom = false
+        }
+    },
+    
+    __triggerbot = {
+        __enabled = false,
+        __is_parrying = false,
+        __parries = 0,
+        __max_parries = 10000,
+        __parry_delay = 0.5
+    }
+}
+
 local net_table_lit = {}
 local get_hash_net, get_hash_parry, get_num_net, get_remote_not, get_key_net_time, get_num_not
 
@@ -89,57 +141,6 @@ if not get_remote_not then
         end
     end)
 end
-local System = {
-    __properties = {
-        __autoparry_enabled = false,
-        __triggerbot_enabled = false,
-        __manual_spam_enabled = false,
-        __auto_spam_enabled = false,
-        __play_animation = false,
-        __curve_mode = 1,
-        __accuracy = 1,
-        __divisor_multiplier = 1.1,
-        __parried = false,
-        __training_parried = false,
-        __spam_threshold = 1.5,
-        __parries = 0,
-        __parry_key = nil,
-        __grab_animation = nil,
-        __tornado_time = tick(),
-        __first_parry_done = false,
-        __connections = {},
-        __reverted_remotes = {},
-        __spam_accumulator = 0,
-        __spam_rate = 29999909,
-        __infinity_active = false,
-        __deathslash_active = false,
-        __timehole_active = false,
-        __slashesoffury_active = false,
-        __slashesoffury_count = 0,
-        __is_mobile = UserInputService.TouchEnabled and not UserInputService.MouseEnabled,
-        __mobile_guis = {}
-    },
-    
-    __config = {
-        __curve_names = {'Camera', 'Random', 'Accelerated', 'Backwards', 'Slow', 'High'},
-        __detections = {
-            __infinity = false,
-            __deathslash = false,
-            __timehole = false,
-            __slashesoffury = false,
-            __phantom = false
-        }
-    },
-    
-    __triggerbot = {
-        __enabled = false,
-        __is_parrying = false,
-        __parries = 0,
-        __max_parries = 10000,
-        __parry_delay = 0.5
-    }
-}
-
 local revertedRemotes = {}
 local originalMetatables = {}
 local Parry_Key = nil
