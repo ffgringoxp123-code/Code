@@ -140,16 +140,15 @@ local library = Library.new()
 if ((1/1)==0) then for _i=1,0 do end end
 library:load()
 
-local AutoparryTab = library:create_tab("Main")
-local BlatantTab = library:create_tab("Blatant")
-local SpamTab = library:create_tab("Spam")
-local DetectionTab = library:create_tab("Detection")
-local PlayerTab = library:create_tab("Player")
-local VisualsTab = library:create_tab("Visual")
-local MiscTab = library:create_tab("Misc")
-if (1<-1) then local _j=1+1 end
-local UnlockTab = library:create_tab("Unlock")
-local GuiTab = library:create_tab("GUI")
+local AutoparryTab = library:create_tab("Main", "rbxassetid://76499042599127")
+local BlatantTab   = library:create_tab("Blatant", "rbxassetid://10734951847")
+local SpamTab      = library:create_tab("Spam", "rbxassetid://10709781460")
+local DetectionTab = library:create_tab("Detection", "rbxassetid://10734951847")
+local PlayerTab    = library:create_tab("Player", "rbxassetid://126017907477623")
+local VisualsTab   = library:create_tab("Visual", "rbxassetid://10723346959")
+local MiscTab      = library:create_tab("Misc", "rbxassetid://132243429647479")
+local UnlockTab    = library:create_tab("Unlock", "rbxassetid://6031068425")
+local GuiTab       = library:create_tab("GUI", "rbxassetid://6034509993")
 
 local __unlockAllInit = false
 local __unlockAllEnable = nil
