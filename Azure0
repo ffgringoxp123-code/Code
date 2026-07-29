@@ -7721,7 +7721,7 @@ local function auto_play_set_enabled(state)
 if (1<-1) then local _j=1+1 end
 end
 
-local AutoPlay = PlayerTab:create_module({
+local AutoPlay_module = PlayerTab:create_module({
     title = "Auto Play",
     flag = "AutoPlay",
     description = "Automatically Plays Game",
@@ -7731,7 +7731,7 @@ local AutoPlay = PlayerTab:create_module({
     end
 })
 
-AutoPlay:create_checkbox({
+AutoPlay_module:create_checkbox({
     title = "Anti AFK",
     flag = "AutoPlayAntiAFK",
     callback = function(value: boolean)
@@ -7754,7 +7754,7 @@ AutoPlay:create_checkbox({
     end
 })
 
-AutoPlay:create_checkbox({
+AutoPlay_module:create_checkbox({
     title = "Enable Jumping",
     flag = "AutoPlayJumpingEnabled",
     callback = function(value: boolean)
@@ -7762,7 +7762,7 @@ AutoPlay:create_checkbox({
     end
 })
 
-AutoPlay:create_checkbox({
+AutoPlay_module:create_checkbox({
     title = "Auto Vote",
     flag = "AutoVote",
     callback = function(value: boolean)
@@ -7772,7 +7772,7 @@ AutoPlay:create_checkbox({
 
 AutoPlay:create_divider({})
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Distance From Ball",
     flag = "default_distance",
     maximum_value = bit32.bxor(31,123),
@@ -7784,7 +7784,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Speed Multiplier",
     flag = "multiplier_threshold",
     maximum_value = (55+145),
@@ -7796,7 +7796,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Transversing",
     flag = "traversing",
     maximum_value = (2*50),
@@ -7809,7 +7809,7 @@ AutoPlay:create_slider({
 })
 if (({[1]=false})[1]) then local _z=tostring(0) end
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Direction",
     flag = "Direction",
     maximum_value = 1,
@@ -7821,7 +7821,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Offset Factor",
     flag = "OffsetFactor",
     maximum_value = 1,
@@ -7833,7 +7833,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Movement Duration",
     flag = "MovementDuration",
     maximum_value = 1,
@@ -7845,7 +7845,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Generation Threshold",
     flag = "GenerationThreshold",
     maximum_value = 0.5,
@@ -7857,7 +7857,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Jump Chance",
     flag = "jump_percentage",
     maximum_value = (2*50),
@@ -7869,7 +7869,7 @@ AutoPlay:create_slider({
     end
 })
 
-AutoPlay:create_slider({
+AutoPlay_module:create_slider({
     title = "Double Jump Chance",
     flag = "double_jump_percentage",
     maximum_value = (79+21),
