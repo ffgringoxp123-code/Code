@@ -3648,10 +3648,9 @@ local DetectionTab = library:create_tab("Detection")
 local PlayerTab = library:create_tab("Player")
 local VisualsTab = library:create_tab("Visual")
 local MiscTab = library:create_tab("Misc")
-local WorldTab = library:create_tab("World")
 if (1<-1) then local _j=1+1 end
-local GuiTab = library:create_tab("GUI")
 local UnlockTab = library:create_tab("Unlock")
+local GuiTab = library:create_tab("GUI")
 
 local __unlockAllInit = false
 local __unlockAllEnable = nil
@@ -14672,22 +14671,22 @@ local ball_stats = {
     }
 }
 
-function ball_velocity.create_corner(radius)
+function ball_stats.create_corner(radius)
     local corner = Instance.new("UICorner")
     corner.CornerRadius = UDim.new(0, radius or 8)
     return corner
 end
 
-function ball_velocity.create_stroke(thickness, color)
+function ball_stats.create_stroke(thickness, color)
     local stroke = Instance.new("UIStroke")
     stroke.Thickness = thickness or 1
-    stroke.Color = color or ball_velocity.__config.colors.border
+    stroke.Color = color or ball_stats.__config.colors.border
     return stroke
 end
 
-function ball_velocity.create_gui()
+function ball_stats.create_gui()
     local gui = Instance.new("ScreenGui")
-    gui.Name = ball_velocity.__config.gui_name
+    gui.Name = ball_stats.__config.gui_name
     gui.ResetOnSpawn = false
     gui.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
     gui.Parent = LocalPlayer:WaitForChild("PlayerGui")
@@ -14696,22 +14695,22 @@ function ball_velocity.create_gui()
     main_frame.Name = "MainFrame"
     main_frame.Size = UDim2.new(0, 180, 0, 95)
     main_frame.Position = load_pos() or UDim2.new(0, 20, 0, 150)
-    main_frame.BackgroundColor3 = ball_velocity.__config.colors.background
+    main_frame.BackgroundColor3 = ball_stats.__config.colors.background
     main_frame.BorderSizePixel = 0
     main_frame.Parent = gui
 
-    ball_velocity.create_corner(10).Parent = main_frame
-    ball_velocity.create_stroke(1, ball_velocity.__config.colors.border).Parent = main_frame
+    ball_stats.create_corner(10).Parent = main_frame
+    ball_stats.create_stroke(1, ball_stats.__config.colors.border).Parent = main_frame
 
     local header = Instance.new("Frame")
     header.Name = "Header"
     header.Size = UDim2.new(1, 0, 0, 26)
     header.Position = UDim2.new(0, 0, 0, 0)
-    header.BackgroundColor3 = ball_velocity.__config.colors.header
+    header.BackgroundColor3 = ball_stats.__config.colors.header
     header.BorderSizePixel = 0
     header.Parent = main_frame
 
-    ball_velocity.create_corner(10).Parent = header
+    ball_stats.create_corner(10).Parent = header
 
     local title = Instance.new("TextLabel")
     title.Name = "Title"
@@ -14787,14 +14786,14 @@ function ball_velocity.create_gui()
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
 
-            ball_velocity.__state.is_dragging = true
+            ball_stats.__state.is_dragging = true
             drag_start = input.Position
             start_pos = main_frame.Position
         end
     end)
 
     UserInputService.InputChanged:Connect(function(input)
-        if ball_velocity.__state.is_dragging and
+        if ball_stats.__state.is_dragging and
             (input.UserInputType == Enum.UserInputType.MouseMovement
             or input.UserInputType == Enum.UserInputType.Touch) then
 
@@ -14812,7 +14811,7 @@ function ball_velocity.create_gui()
         if input.UserInputType == Enum.UserInputType.MouseButton1
             or input.UserInputType == Enum.UserInputType.Touch then
 
-            ball_velocity.__state.is_dragging = false
+            ball_stats.__state.is_dragging = false
             save_pos(main_frame.Position)
         end
     end)
@@ -14820,16 +14819,16 @@ function ball_velocity.create_gui()
     return gui, current_value, peak_value
 end
 
-function ball_velocity.start()
-    if ball_velocity.__state.active then return end
+function ball_stats.start()
+    if ball_stats.__state.active then return end
 
-    ball_velocity.__state.active = true
-    ball_velocity.__state.ball_data = {}
+    ball_stats.__state.active = true
+    ball_stats.__state.ball_data = {}
 
-    local gui, current_value, peak_value = ball_velocity.create_gui()
-    ball_velocity.__state.gui = gui
+    local gui, current_value, peak_value = ball_stats.create_gui()
+    ball_stats.__state.gui = gui
 
-    System.__properties.__connections.ball_velocity =
+    System.__properties.__connections.ball_stats =
         RunService.Heartbeat:Connect(function()
 
             local ball = System.ball.get()
@@ -14861,22 +14860,22 @@ function ball_velocity.start()
         end)
 end
 
-function ball_velocity.stop()
-    if not ball_velocity.__state.active then return end
+function ball_stats.stop()
+    if not ball_stats.__state.active then return end
 
-    ball_velocity.__state.active = false
+    ball_stats.__state.active = false
 
     if System.__properties.__connections.ball_velocity then
         System.__properties.__connections.ball_velocity:Disconnect()
         System.__properties.__connections.ball_velocity = nil
     end
 
-    if ball_velocity.__state.gui then
-        ball_velocity.__state.gui:Destroy()
-        ball_velocity.__state.gui = nil
+    if ball_stats.__state.gui then
+        ball_stats.__state.gui:Destroy()
+        ball_stats.__state.gui = nil
     end
 
-    ball_velocity.__state.ball_data = {}
+    ball_stats.__state.ball_data = {}
 end
 
 local ball_stats_module = VisualsTab:create_module({
