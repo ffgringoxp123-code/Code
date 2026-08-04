@@ -2918,4 +2918,11 @@ end
     return self
 end
 
-return Library
+local library = Library.new()
+library:load()
+
+-- Create tabs
+local AutoparryTab = library:create_tab("Main", "rbxassetid://76499042599127")
+local AvatarTab = library:create_tab("Avatar", "rbxassetid://126017907477623")
+local SwordTab = library:create_tab("Sword", "rbxassetid://6031094678")
+local SettingTab = library:create_tab("Setting", "rbxassetid://6031280882")
